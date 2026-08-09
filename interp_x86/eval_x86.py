@@ -254,6 +254,18 @@ class X86Emulator:
                 v2 = self.eval_arg(a2)
                 self.store_arg(a2, xor64(v1, v2))
 
+            elif instr.data == 'andq':
+                a1, a2 = instr.children
+                v1 = self.eval_arg(a1)
+                v2 = self.eval_arg(a2)
+                self.store_arg(a2, and64(v1, v2))
+
+            elif instr.data == 'sarq':
+                a1, a2 = instr.children
+                v1 = self.eval_arg(a1)
+                v2 = self.eval_arg(a2)
+                self.store_arg(a2, sar64(v1, v2))
+
             elif instr.data == 'negq':
                 a1 = instr.children[0]
                 v1 = self.eval_arg(a1)

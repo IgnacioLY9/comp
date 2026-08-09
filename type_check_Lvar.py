@@ -1,5 +1,5 @@
 from ast import *
-from utils import IntType
+from utils import IntType, BoolType
 
 # This is the type checker for Lvar and LmonVar.
 
@@ -50,7 +50,11 @@ class TypeCheckLvar:
         return self.type_check_stmts(ss[1:], env)
       case Expr(Call(Name('print'), [arg])):
         t = self.type_check_exp(arg, env)
-        self.check_type_equal(t, IntType(), arg)
+        # this is a crazy hack
+        if t == BoolType():
+            self.check_type_equal(t, BoolType(), arg)
+        else:
+            self.check_type_equal(t, IntType(), arg)
         return self.type_check_stmts(ss[1:], env)
       case Expr(value):
         self.type_check_exp(value, env)

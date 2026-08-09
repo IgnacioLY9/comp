@@ -143,9 +143,11 @@ class UndirectedAdjList(DirectedAdjList):
     def add_edge(self, u, v):
         self.add_vertex(u)
         self.add_vertex(v)
+        edge = UEdge(u,v)
+        if edge in self.edge_set:
+            return edge
         self.out[u].append(v)
         self.out[v].append(u)
-        edge = UEdge(u,v)
         self.edge_set.add(edge)
         return edge
 

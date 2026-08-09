@@ -4,6 +4,7 @@ from sys import platform
 import ast
 from ast import *
 from dataclasses import dataclass
+from customParser import parse_tree_to_ast, parse_lark
 
 # move these to the compilers, use a method with overrides -Jeremy
 builtin_functions = \
@@ -639,6 +640,22 @@ def make_begin(bs, e):
 
 
 @dataclass
+class Promise:
+    fun : typing.Any
+    cache : list[stmt] = None
+    def force(self):
+        if self.cache is None:
+            self.cache = self.fun(); return self.cache
+        else:
+            return self.cache
+
+def force(promise):
+    if isinstance(promise, Promise):
+        return promise.force()
+    else:
+        return promise
+
+@dataclass
 class Cast(expr):
     body: expr
     source: Type
@@ -1088,6 +1105,12 @@ def neg64(x):
 def xor64(x,y):
     return to_signed(x^y)
 
+def and64(x,y):
+    return to_signed(x&y)
+
+def sar64(x,y):
+    return to_signed(y>>x)
+
 def is_int64(x) -> bool:
     return isinstance(x,int) and (x >= min_int64 and x <= max_int64)
 
@@ -1192,6 +1215,10 @@ def compile_and_test(compiler, compiler_name,
     program_root = os.path.splitext(program_filename)[0]
     with open(program_filename) as source:
         program = parse(source.read())
+        # temp = parse_lark(source.read())
+        # print(temp)
+        # program = parse_tree_to_ast(temp)
+        # print(repr(program))
 
     trace('\n# source program: ' + os.path.basename(program_root) + '\n')
     trace(program)
@@ -1382,6 +1409,8 @@ def compile_and_test(compiler, compiler_name,
     passname = 'expose_allocation'
     if hasattr(compiler, passname):
         trace('\n# ' + passname + '\n')
+        trace('running type checker')
+        type_check_dict[passname](program)
         program = compiler.expose_allocation(program)
         trace(program)
         if passname in type_check_dict.keys():
@@ -1461,6 +1490,9 @@ def compile_and_test(compiler, compiler_name,
         program = compiler.prelude_and_conclusion(program)
         trace(program)
         trace("")
+
+        test_pass(passname, interp_dict, program_root, program,
+                      compiler_name)
 
         x86_filename = program_root + ".s"
         with open(x86_filename, "w") as dest:

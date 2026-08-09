@@ -1,0 +1,27 @@
+0a1
+> 42
+0a1
+> 42
+0a1
+> 0
+0a1
+> 42
+0a1
+> 3
+0a1
+> 42
+0a1
+> 25
+compiler var, executable failed on test t4
+compiler var, executable failed on test t1
+compiler var, executable failed on test zero
+compiler var, executable failed on test input
+compiler var, executable failed on test t3
+compiler var failed pass remove_complex_operands on test:
+/home/ignacio/Documents/python-student-support-code/tests/var/sub-input
+
+compiler var, executable failed on test sub-input
+compiler var, executable failed on test add
+compiler var, executable failed on test t2
+tests: 0/8 for compiler var on language var
+passes: 7/40 for compiler var on language var

@@ -86,7 +86,10 @@ class TypeCheckCif:
         env[lhs.id] = self.combine_types(t, lhs_ty)
       case Expr(Call(Name('print'), [arg])):
         t = self.type_check_exp(arg, env)
-        self.check_type_equal(t, IntType(), s)
+        if t == BoolType():
+            self.check_type_equal(t, BoolType(), s)
+        else:
+            self.check_type_equal(t, IntType(), s)
       case Expr(value):
         self.type_check_exp(value, env)
       case _:

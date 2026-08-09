@@ -11,6 +11,9 @@ class PriorityQueue:
         self.get_key_and_pos[key] = kp
         self.heap.insert(kp)
 
+    def top(self):
+        return self.heap.maximum().key
+
     def pop(self):
         return self.heap.extract_max().key
 

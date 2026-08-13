@@ -242,6 +242,15 @@ class X86Emulator:
                 v2 = self.eval_arg(a2)
                 self.store_arg(a2, add64(v1, v2))
 
+            elif instr.data == 'imulq':
+                a1, a2 = instr.children
+                v1 = self.eval_arg(a1)
+                v2 = self.eval_arg(a2)
+                with open("example.txt", "w", encoding="utf-8") as file:
+                    file.write(repr(a1))
+                    file.write(repr(a2))
+                self.store_arg(a2, mul64(v1, v2))
+
             elif instr.data == 'subq':
                 a1, a2 = instr.children
                 v1 = self.eval_arg(a1)
@@ -327,6 +336,12 @@ class X86Emulator:
                 target = str(instr.children[0])
                 if target == 'print_int':
                     self.log(f'CALL TO print_int: {self.registers["rdi"]}')
+                    output.append(self.registers['rdi'])
+                    if self.logging:
+                        print(self.print_state())
+
+                elif target == 'call_exit':
+                    self.log(f'CALL TO call_exit: {self.registers["rdi"]}')
                     output.append(self.registers['rdi'])
                     if self.logging:
                         print(self.print_state())

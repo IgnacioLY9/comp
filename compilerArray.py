@@ -9,12 +9,12 @@ import os
 from typing import List, Set, Dict
 from typing import Tuple as Tup
 
-from compilerWhile import CompilerWhile
+from compilerTup import CompilerTup
 
 Binding = Tup[Name, expr]
 Temporaries = List[Binding]
 
-class CompilerTup(CompilerWhile):
+class CompilerArray(CompilerTup):
 
     ###############################################################
     ######## Partial Eval
@@ -29,20 +29,31 @@ class CompilerTup(CompilerWhile):
     def pe_sub(self, e1: expr, e2: expr) -> expr:
         return super().pe_sub(e1, e2)
 
+    def pe_mult(self, e1: expr, e2: expr) -> expr:
+        match (e1, e2):
+            case (Constant(n1), Constant(n2)):
+                return Constant(mul64(n1,n2))
+            case _:
+                return BinOp(e1, Mult(), e2)
+
     def pe_exp(self, e: expr, env: Set[expr]) -> expr:
         match e:
-            case Tuple(exp, Load()):
-                es = [self.pe_exp(e, env) for e in exp]
-                return Tuple(es, Load())
-            case Subscript(exp, idx, Load()):
-                return Subscript(self.pe_exp(exp, env), idx, Load())
-            case Call(Name('len'), [exp]):
-                return Call(Name('len'), [self.pe_exp(exp, env)])
+            case BinOp(left, Mult(), right):
+                return self.pe_mult(self.pe_exp(left, env), self.pe_exp(right, env))
+            case Subscript(arg1, arg2, Load()):
+                return Subscript(self.pe_exp(arg1, env), self.pe_exp(arg2, env), Load())
+            case ast.List(args, Load()):
+                es = [self.pe_exp(a, env) for a in args]
+                return ast.List(es, Load())
             case _:
                 return super().pe_exp(e, env)
                 
     def pe_stmt(self, s: statement, env: Set[expr]) -> expr:
-        return super().pe_stmt(s, env)
+        match s:
+            case Assign([Subscript(arg1, arg2, Store())], arg3):
+                return Assign([Subscript(self.pe_exp(arg1, env), self.pe_exp(arg2, env), Store())], self.pe_exp(arg3, env))
+            case _:
+                return super().pe_stmt(s, env)
 
     def partial_eval(self, p: Module) -> Module:
         match p:
@@ -58,18 +69,22 @@ class CompilerTup(CompilerWhile):
 
     def shrink_exp(self, e: exp) -> exp:
         match e:
-            case Tuple(exp, Load()):
-                es = [self.shrink_exp(e) for e in exp]
-                return Tuple(es, Load())
-            case Subscript(exp, idx, Load()):
-                return Subscript(self.shrink_exp(exp), idx, Load())
-            case Call(Name('len'), [exp]):
-                return Call(Name('len'), [self.shrink_exp(exp)])
+            case BinOp(left, Mult(), right):
+                return BinOp(self.shrink_exp(left), Mult(), self.shrink_exp(right))
+            case Subscript(arg1, arg2, Load()):
+                return Subscript(self.shrink_exp(arg1), self.shrink_exp(arg2), Load())
+            case ast.List(args, Load()):
+                es = [self.shrink_exp(a) for a in args]
+                return ast.List(es, Load())
             case _:
                 return super().shrink_exp(e)
 
     def shrink_stmt(self, s: stmt) -> stmt:
-        return super().shrink_stmt(s)
+        match s:
+            case Assign([Subscript(arg1, arg2, Store())], arg3):
+                return Assign([Subscript(self.shrink_exp(arg1), self.shrink_exp(arg2), Store())], self.shrink_exp(arg3))
+            case _:
+                return super().shrink_stmt(s)
 
     def shrink(self, p: Module) -> Module:
         match p:
@@ -80,64 +95,195 @@ class CompilerTup(CompilerWhile):
                 raise Exception ('error in shrink + ', repr(p))
 
     ###############################################################
+    ######## Resolve
+    ###############################################################
+
+    def resolve_exp(self, e: exp) -> exp:
+        match e:
+            case Constant(value):
+                return e
+            case Call(Name('input_int'),[]):
+                return e
+            case Call(Name('print'), [exp]):
+                return Call(Name('print'), [self.resolve_exp(exp)])
+            case UnaryOp(op, exp):
+                return UnaryOp(op, self.resolve_exp(exp))
+            case BinOp(exp1, op, exp2):
+                return BinOp(self.resolve_exp(exp1), op, self.resolve_exp(exp2))
+            case Name(var):
+                return e
+            case BoolOp(boolop, [exp1, exp2]):
+                return BoolOp(boolop, [self.resolve_exp(exp1), self.resolve_exp(exp2)])
+            case Compare(exp1, [cmp], [exp2]):
+                return Compare(self.resolve_exp(exp1), [cmp], [self.resolve_exp(exp2)])
+            case IfExp(exp1, exp2, exp3):
+                return IfExp(self.resolve_exp(exp1), self.resolve_exp(exp2), self.resolve_exp(exp3))
+            case Tuple(exps, Load()):
+                es = [self.resolve_exp(exp) for exp in exps]
+                return Tuple(es, Load())
+            case Call(Name('len'),[exp]):
+                if isinstance(exp.has_type, ListType):
+                    return Call(Name('array_len'), [self.resolve_exp(exp)])
+                else:
+                    return Call(Name('len'), [self.resolve_exp(exp)])
+            case Subscript(exp1, exp2, Load()):
+                if isinstance(exp1.has_type, ListType):
+                    return Call(Name('array_load'), [self.resolve_exp(exp1), self.resolve_exp(exp2)])
+                else:
+                    return Subscript(self.resolve_exp(exp1), self.resolve_exp(exp2), Load())
+            case ast.List(exps, Load()):
+                es = [self.resolve_exp(exp) for exp in exps]
+                return ast.List(es, Load())
+            case _:
+                raise Exception ('error in resolve_exp + ', repr(e))
+
+    def resolve_stmt(self, s: stmt) -> stmt:
+        match s:
+            case Assign([Subscript(exp1, exp2, Store())], exp3):
+                if isinstance(exp1.has_type, ListType):
+                    return Expr(Call(Name('array_store'), [self.resolve_exp(exp1), self.resolve_exp(exp2), self.resolve_exp(exp3)]))
+                else:
+                    return Assign([Subscript(self.resolve_exp(exp1), self.resolve_exp(exp2), Store())], self.resolve_exp(exp3))
+            case While(exp, stmts, []):
+                es = [self.resolve_stmt(stmt) for stmt in stmts]
+                return While(self.resolve_exp(exp), es, [])
+            case If(exp, stmts1, stmts2):
+                es1 = [self.resolve_stmt(stmt) for stmt in stmts1]
+                es2 = [self.resolve_stmt(stmt) for stmt in stmts2]
+                return If(self.resolve_exp(exp), es1, es2)
+            case Assign([Name(var)], exp):
+                return Assign([Name(var)], self.resolve_exp(exp))
+            case Expr(exp):
+                return Expr(self.resolve_exp(exp))
+            case _:
+                raise Exception ('error in resolve_stmt + ', repr(s))
+
+    def resolve(self, p: Module) -> Module:
+        match p:
+            case Module(body):
+                stmts = [self.resolve_stmt(stmt) for stmt in body]
+                return Module(stmts)
+            case _:
+                raise Exception ('error in resolve + ', repr(p))
+
+    ###############################################################
+    ######## Check Bounds
+    ###############################################################
+
+    def cb_exp(self, e: exp) -> exp:
+        match e:
+            case Constant(value):
+                return e
+            case Call(Name('input_int'),[]):
+                return e
+            case Call(Name('print'), [exp]):
+                return Call(Name('print'), [self.cb_exp(exp)])
+            case Call(Name('len'),[exp]):
+                return Call(Name('len'), [self.cb_exp(exp)])
+            case Call(Name('array_len'), [tup]):
+                return Call(Name('array_len'), [self.cb_exp(tup)])
+            case Call(Name('array_load'), [tup, idx]):
+                tup = self.cb_exp(tup)
+                idx = self.cb_exp(idx)
+                first = Compare(idx, [GtE()], [Constant(0)])
+                second = Compare(Call(Name('array_len'), [tup]), [Gt()], [idx])
+                test = IfExp(first, second, Constant(False))
+                return IfExp(test, Call(Name('array_load'), [tup, idx]), Call(Name('exit'), [])) # exit(0) ?
+            case Call(Name('array_store'), [tup, idx, val]):
+                tup = self.cb_exp(tup)
+                idx = self.cb_exp(idx)
+                val = self.cb_exp(val)
+                first = Compare(idx, [tup], [GtE()], [Constant(0)])
+                second = Compare(Call(Name('array_len'), [tup]), [Gt()], [idx])
+                test = IfExp(first, second, Constant(False))
+                return IfExp(test, Call(Name('array_store'), [tup, idx, val]), Call(Name('exit'), [])) # exit(0) ?
+            case UnaryOp(op, exp):
+                return UnaryOp(op, self.cb_exp(exp))
+            case BinOp(exp1, op, exp2):
+                return BinOp(self.cb_exp(exp1), op, self.cb_exp(exp2))
+            case Name(var):
+                return e
+            case BoolOp(boolop, [exp1, exp2]):
+                return BoolOp(boolop, [self.exp_exp(exp1), self.exp_exp(exp2)])
+            case Compare(exp1, [cmp], [exp2]):
+                return Compare(self.cb_exp(exp1), [cmp], [self.cb_exp(exp2)])
+            case IfExp(exp1, exp2, exp3):
+                return IfExp(self.cb_exp(exp1), self.cb_exp(exp2), self.cb_exp(exp3))
+            case Tuple(exps, Load()):
+                es = [self.cb_exp(exp) for exp in exps]
+                return Tuple(es, Load())
+            case Subscript(exp1, exp2, Load()):
+                return Subscript(self.cb_exp(exp1), self.cb_exp(exp2), Load())
+            case ast.List(exps, Load()):
+                es = [self.cb_exp(exp) for exp in exps]
+                return ast.List(es, Load())
+            case _:
+                raise Exception ('error in cb_exp + ', repr(e))
+
+    def cb_stmt(self, s: stmt) -> stmt:
+        match s:
+            case Assign([Subscript(exp1, exp2, Store())], exp3):
+                return Assign([Subscript(self.cb_exp(exp1), self.cb_exp(exp2), Store())], self.cb_exp(exp3))
+            case While(exp, stmts, []):
+                es = [self.cb_stmt(stmt) for stmt in stmts]
+                return While(self.cb_exp(exp), es, [])
+            case If(exp, stmts1, stmts2):
+                es1 = [self.cb_stmt(stmt) for stmt in stmts1]
+                es2 = [self.cb_stmt(stmt) for stmt in stmts2]
+                return If(self.cb_exp(exp), es1, es2)
+            case Assign([Name(var)], exp):
+                return Assign([Name(var)], self.cb_exp(exp))
+            case Expr(exp):
+                return Expr(self.cb_exp(exp))
+            case _:
+                raise Exception ('error in cb_stmt + ', repr(s))
+
+    def check_bounds(self, p: Module) -> Module:
+        match p:
+            case Module(body):
+                stmts = [self.cb_stmt(stmt) for stmt in body]
+                return Module(stmts)
+            case _:
+                raise Exception ('error in check_bounds + ', repr(p))
+
+    ###############################################################
     ######## Expose Allocation
     ###############################################################
 
     def expose_alloc(self, tup: List[expr], alloc: Allocate) -> exp:
-        l = len(tup)
+        return super().expose_alloc(tup, alloc)
+
+    def expose_alloc_array(self, arr: List[expr], alloc: AllocateArray) -> exp:
+        l = len(arr)
         space = (l + 1) * 8
-        arr = generate_name('alloc')
-        init_vars = [generate_name('init') for t in tup]
+        array = generate_name('alloc_arr')
+        init_vars = [generate_name('init_arr') for a in arr]
         inits = []
         for i in range(l):
-            inits += [Assign([Name(init_vars[i])], tup[i])]
+            inits += [Assign([Name(init_vars[i])], arr[i])]
         conditional = Compare(BinOp(GlobalValue('free_ptr'), Add(), Constant(space)),[Lt()], [GlobalValue('fromspace_end')])
-        initialize = [Assign([Name(arr)], alloc)]
+        initialize = [Assign([Name(array)], alloc)]
         assignment = []
         for i in range(l):
-            assignment += [Assign([Subscript(Name(arr), Constant(i), Store())], Name(init_vars[i]))]
+            assignment += [Assign([Subscript(Name(array), Constant(i), Store())], Name(init_vars[i]))]
         body = inits + [If(conditional, [], [Collect(space)])] + initialize + assignment
-        return Begin(body, Name(arr))
+        return Begin(body, Name(array))
 
     def expose_exp(self, e: exp) -> exp:
         match e:
-            case Name(id):
-                return e
-            case Constant(value):
-                return e
-            case BinOp(arg1, op, arg2):
-                return BinOp(self.expose_exp(arg1), op, self.expose_exp(arg2))
-            case UnaryOp(op, arg):
-                return UnaryOp(op, self.expose_exp(arg))
-            case Call(Name(func), args):
-                return Call(Name(func), [self.expose_exp(ex) for ex in args])
-            case IfExp(arg1, arg2, arg3):
-                return IfExp(self.expose_exp(arg1), self.expose_exp(arg2), self.expose_exp(arg3))
-            case Begin(body, result):
-                return Begin([self.expose_stmt(s) for s in body], self.expose_exp(result))
-            case Compare(arg1, cmp, arg2):
-                return Compare(self.expose_exp(arg1), cmp, [self.expose_exp(s) for s in arg2])
-            case Tuple(arg, Load()):
+            case ast.List(arg, Load()):
                 new_body = [self.expose_exp(ex) for ex in arg]
-                alloc = Allocate(len(new_body), e.has_type)
-                return self.expose_alloc(new_body, alloc)
-            case Subscript(arg, idx, Load()):
-                return Subscript(self.expose_exp(arg), self.expose_exp(idx), Load())
+                alloc = AllocateArray(len(new_body), e.has_type)
+                return self.expose_alloc_array(new_body, alloc)
             case _:
-                raise Exception ('error in expose_arg + ', repr(e))
+                return super().expose_exp(e)
 
     def expose_stmt(self, s: stmt) -> stmt:
         match s:
-            case Expr(exp):
-                return Expr(self.expose_exp(exp))
-            case If(arg1, arg2, arg3):
-                return If(self.expose_exp(arg1), [self.expose_stmt(s) for s in arg2], [self.expose_stmt(s) for s in arg3])
-            case While(arg1, arg2):
-                return While(self.expose_exp(arg1), [self.expose_stmt(s) for s in arg2])
-            case Assign(lhs, rhs):
-                return Assign(lhs, self.expose_exp(rhs))
+            case Assign([Subscript(exp1, exp2, Store())], exp3):
+                return Assign([Subscript(self.expose_exp(exp1), self.expose_exp(exp2), Store())], self.expose_exp(exp3))
             case _:
-                raise Exception ('error in expose_stmt + ', repr(s))
+                return super().expose_stmt(s)
 
     def expose_allocation(self, p: Module) -> Module:
         match p:
@@ -153,39 +299,33 @@ class CompilerTup(CompilerWhile):
 
     def rco_exp(self, e: expr, need_atomic : bool) -> Tup[expr, Temporaries]:
         match e:
-            case GlobalValue(value):
-                return e, []
-            case Subscript(arg1, arg2, Load()):
-                newVar1, newMap1 = self.rco_exp(arg1, True)
-                newVar2, newMap2 = self.rco_exp(arg2, True)
-                if need_atomic:
-                    temp = Name(generate_name('tmp'))
-                    return temp, newMap1 + newMap2 + [Assign([temp], Subscript(newVar1, newVar2, Load()))]
-                else:
-                    return Subscript(newVar1, newVar2, Load()), newMap1 + newMap2
-            case Call(Name('len'), [arg]):
-                newVar, newMap = self.rco_exp(arg, True)
+            case Call(Name('array_len'), [tup]):
+                newVar1, newMap1 = self.rco_exp(tup, True)
                 newTemp = Name(generate_name('tmp'))
-                return newTemp, [Assign([newTemp], Call(Name('len'),[newVar]))] + newMap
-            case Allocate(arg1, t):
+                return newTemp, [Assign([newTemp], Call(Name('array_len'), [newVar1]))] + newMap1
+            case Call(Name('array_load'), [tup, idx]):
+                newVar1, newMap1 = self.rco_exp(tup, True)
+                newVar2, newMap2 = self.rco_exp(idx, True)
+                newTemp = Name(generate_name('tmp'))
+                return newTemp, [Assign([newTemp], Call(Name('array_load'), [newVar1, newVar2]))] + newMap1 + newMap2
+            case Call(Name('array_store'), [tup, idx, val]):
+                newVar1, newMap1 = self.rco_exp(tup, True)
+                newVar2, newMap2 = self.rco_exp(idx, True)
+                newVar3, newMap3 = self.rco_exp(val, True)
+                return Call(Name('array_store'), [newVar1, newVar2, newVar3]), newMap1 + newMap2 + newMap3
+            case AllocateArray(arg1, t):
                 if need_atomic:
                     temp = Name(generate_name('tmp'))
                     return temp, [Assign([temp], e)]
                 else:
                     return e, []
+            case Call(Name('exit'), []):
+                return e, []
             case _:
                 return super().rco_exp(e, need_atomic)
 
     def rco_stmt(self, s: stmt) -> List[stmt]:
-        match s:
-            case Collect(value):
-                return [s]
-            case Assign([Subscript(arg1, arg2, Store())], arg3):
-                newVar1, newMap1 = self.rco_exp(arg1, True)
-                newVar3, newMap3 = self.rco_exp(arg3, True)
-                return newMap1 + newMap3 + [Assign([Subscript(newVar1, arg2, Store())], newVar3)]
-            case _:
-                return super().rco_stmt(s)
+        return super().rco_stmt(s)
 
     def remove_complex_operands(self, p: Module) -> Module:
         match p:
@@ -227,9 +367,8 @@ class CompilerTup(CompilerWhile):
     
     def explicate_stmt(self, s: stmt, cont: List[stmt], basic_blocks: Dict[str, List[stmt]]) -> List[stmt]:
         match s:
-            case Collect(arg):
-                cont_block = self.create_block(cont, basic_blocks)
-                return [s] + force(cont_block)
+            case Expr(Call(Name('array_store'), args)):
+                raise Exception ('sto[]')
             case _:
                 return super().explicate_stmt(s, cont, basic_blocks)
     
@@ -337,74 +476,71 @@ class CompilerTup(CompilerWhile):
     ###############################################################
 
     def select_arg(self, e: expr) -> arg:
-        match e:
-            case GlobalValue(value):
-                return Global(label_name(value))
-            case Subscript(arg1, arg2, Store()):
-                return 8(arg2 + 1)(arg1)
-            case _:
-                return super().select_arg(e)
+            return super().select_arg(e)
 
     def select_op(self, op: operator) -> str:
         match op:
-            case Is():
-                return 'sete'
+            case Mult():
+                return 'imulq'
             case _:
                 return super().select_op(op)
 
     def select_jump(self, op: operator) -> str:
-        match op:
-            case Is():
-                return 'e'
-            case _:
-                return super().select_jump(op)
+            return super().select_jump(op)
 
     def isPointer(self, arg: TupleType) -> bool:
         match arg:
-            case TupleType(t):
+            case ListType(t):
                 return True
             case _:
-                return False
+                return super().isPointer(arg)
 
     def select_stmt(self, s: stmt) -> List[instr]:
         match s:
-            case Collect(value):
-                return [Instr('movq', [Reg('r15'), Reg('rdi')]),
-                        Instr('movq', [Immediate(value), Reg('rsi')]),
-                        Callq(label_name('collect'), 2)]
-            case Assign([Subscript(arg1, arg2, Store())], arg3):
+            case Assign([arg1], Call(Name('array_load'), [tup, idx])):
                 arg1 = self.select_arg(arg1)
-                arg2 = self.select_arg(arg2).value
-                arg3 = self.select_arg(arg3)
+                arg2 = self.select_arg(tup)
+                arg3 = self.select_arg(idx)
+                return [Instr('movq', [arg2, Reg('r11')]), # put arr in r11
+                        Instr('movq', [arg3, Reg('rax')]), # put arg3 in rax
+                        Instr('addq', [Immediate(1), Reg('rax')]), # get the offset
+                        Instr('imulq', [Immediate(8), Reg('rax')]),
+                        Instr('addq', [Reg('rax'), Reg('r11')]), # get the memory location we want
+                        Instr('movq', [Deref('r11', 0), arg1])] # put the value in the arg
+            case Expr(Call(Name('array_store'), [tup, idx, val])):
+                arg1 = self.select_arg(tup)
+                arg2 = self.select_arg(idx)
+                arg3 = self.select_arg(val)
                 return [Instr('movq', [arg1, Reg('r11')]),
-                        Instr('movq', [arg3, Deref('r11', 8*(arg2 + 1))])]
-            case Assign([arg1], Subscript(arg2, arg3, Load())):
+                        Instr('movq', [arg2, Reg('rax')]),
+                        Instr('addq', [Immediate(1), Reg('rax')]),
+                        Instr('imulq', [Immediate(8), Reg('rax')]),
+                        Instr('addq', [Reg('rax'), Reg('r11')]),
+                        Instr('movq', [arg3, Deref('r11', 0)])]
+            case Assign([arg1], Call(Name('array_len'), [arg2])):
                 arg1 = self.select_arg(arg1)
-                arg2 = self.select_arg(arg2)
-                arg3 = self.select_arg(arg3).value
-                return [Instr('movq', [arg2, Reg('r11')]),
-                        Instr('movq', [Deref('r11', 8*(arg3 + 1)), arg1])]
-            case Assign([arg1], Call(Name('len'), [arg2])):
-                arg1 = self.select_arg(arg1)        
                 arg2 = self.select_arg(arg2)
                 return [Instr('movq', [arg2, Reg('rax')]), # put tuple in rax
                         Instr('movq', [Deref('rax', 0), Reg('rax')]), # dereference to load the actual bits in rax
-                        Instr('andq', [Immediate(126), Reg('rax')]), # and with 126 to get just the bits that store size
-                        Instr('sarq', [Immediate(1), Reg('rax')]), # shift right to get rid of the trailing 0 (used for garbage collection)
+                        Instr('movq', [Immediate((2 ** 62) - 4), Reg('r11')]),
+                        Instr('andq', [Reg('r11'), Reg('rax')]), # and with 2^64 - 2 to get just the bits that store size
+                        Instr('sarq', [Immediate(2), Reg('rax')]), # shift right to get rid of the trailing 0s 
                         Instr('movq', [Reg('rax'), arg1])] # store length in arg2
-            case Assign([arg1], Allocate(arg2, TupleType(types))):
+            case Assign([arg1], AllocateArray(arg2, ListType(types))):
                 arg1 = self.select_arg(arg1)
                 len = arg2
-                type_tag = 0
-                count = 7
-                for t in types:
-                    type_tag |= bool2int(self.isPointer(t)) << count
-                    count += 1
-                tag = type_tag | (len << 1) | 1
+                if self.isPointer(types):
+                    pointer_mask = 1
+                else:
+                    pointer_mask = 0
+                tag = 0 | (len << 2) | (pointer_mask << 1)| 1
                 return [Instr('movq', [Global(label_name('free_ptr')), Reg('r11')]),
                         Instr('addq', [Immediate(8 * (len + 1)), Global(label_name('free_ptr'))]),
                         Instr('movq', [Immediate(tag), Deref('r11', 0)]),
                         Instr('movq', [Reg('r11'), arg1])]
+            case Assign([arg1], Call(Name('exit'), [])):
+                return [Instr('movq', [Immediate(255), Reg('rdi')]),
+                        Callq(label_name('call_exit'), 1)]
             case _:
                 return super().select_stmt(s)
 
@@ -443,18 +579,14 @@ class CompilerTup(CompilerWhile):
 
     def R(self, i: instr) -> Set[location]:
         match i:
-            case Instr('andq', args):
-                return self.getLoc(args[1])
-            case Instr('sarq', args):
-                return self.getLoc(args[1])
+            case Instr('imulq', args):
+                return self.getLoc(args[0]) | self.getLoc(args[1])
             case _:
                 return super().R(i)
 
     def W(self, i: instr) -> Set[location]:
         match i:
-            case Instr('andq', args):
-                return self.getLoc(args[1])
-            case Instr('sarq', args):
+            case Instr('imulq', args):
                 return self.getLoc(args[1])
             case _:
                 return super().W(i)
@@ -634,12 +766,16 @@ class CompilerTup(CompilerWhile):
 
     def patch_instr(self, i: instr) -> List[instr]:
         match i:
-            case Instr('movq', [Global(label), Deref(loc, offset)]):
-                return [Instr('movq', [Global(label), Reg('rax')]),
-                        Instr('movq', [Reg('rax'), Deref(loc, offset)])]
-            case Instr('movq', [Deref(loc, offset), Global(label)]):
-                return [Instr('movq', [Deref(loc, offset), Reg('rax')]),
-                        Instr('movq', [Reg('rax'), Global(label)])]
+            # case need mult
+            case (Instr('imulq', [arg, Immediate(value)])):
+                return [instr('movq', [Immediate(value), reg('rax')]),
+                        instr('imulq', [arg, reg('rax')])]
+            case (Instr('imulq', [arg, Deref(loc, offset)])):
+                return [instr('movq', [Deref(loc, offset), reg('rax')]),
+                        instr('imulq', [arg, reg('rax')])]
+            case (Instr('imulq', [arg, Global(label)])):
+                return [instr('movq', [Global(label), reg('rax')]),
+                        instr('imulq', [arg, reg('rax')])]
             case _:
                 return super().patch_instr(i)
 
@@ -735,4 +871,3 @@ class CompilerTup(CompilerWhile):
                 return p
             case _:
                 raise Exception ('error in prelude_and_conclusion + ', repr(p))
-

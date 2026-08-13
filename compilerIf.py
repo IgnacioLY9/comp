@@ -203,11 +203,15 @@ class CompilerIf(CompilerVar):
                 block = self.create_block([Expr(e)] + force(cont), basic_blocks)
                 return block
             case Begin(body, result):
-                cont_block = self.create_block(cont, basic_blocks)
-                newBody = []
+                # cont_block = self.create_block(cont, basic_blocks)
+                # newBody = []
+                # for s in reversed(body):
+                #     newBody = self.explicate_stmt(s, newBody, basic_blocks)
+                # return newBody + force(cont_block)
+                ss = self.explicate_effect(result, cont, basic_blocks)
                 for s in reversed(body):
-                    newBody = self.explicate_stmt(s, newBody, basic_blocks)
-                return newBody + force(cont_block)
+                    ss = self.explicate_stmts(s, ss, basic_blocks)
+                return ss
             case _:
                 return cont
     

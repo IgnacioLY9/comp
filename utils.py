@@ -1284,6 +1284,7 @@ def compile_and_test(compiler, compiler_name,
     passname = 'resolve'
     if hasattr(compiler, passname):
         trace('\n# ' + passname + '\n')
+        type_check_dict[passname](program)
         program = compiler.resolve(program)
         trace(program)
         trace('')

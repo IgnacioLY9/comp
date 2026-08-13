@@ -123,15 +123,13 @@ class CompilerWhile(CompilerIf):
         match s:
             case While(arg1, arg2, []):
                 cont_block = self.create_block(cont, basic_blocks)
-                newBody = cont_block
+                label = label_name(generate_name('label'))
+                newBody = [Goto(label)]
                 for s in reversed(arg2):
                     newBody = self.explicate_stmt(s, newBody, basic_blocks)
                 newStmt = self.explicate_pred(arg1, newBody, cont_block, basic_blocks)
-                temp = self.create_block(newStmt, basic_blocks)
-                block_label = force(temp)[0].label
-                jump_label = basic_blocks[block_label][0].body[-1].label
-                basic_blocks[jump_label][-1].label = block_label
-                return temp
+                basic_blocks[label] = newStmt
+                return [Goto(label)]
             case _:
                 return super().explicate_stmt(s, cont, basic_blocks)
     

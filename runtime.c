@@ -594,7 +594,9 @@ void copy_vector(int64_t** vector_ptr_loc)
   }
 }
 
-
+void call_exit(int64_t x) {
+    exit(x);
+}
 
 // Read an integer from stdin
 int64_t read_int() {

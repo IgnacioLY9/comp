@@ -47,7 +47,7 @@ class CompilerIf(CompilerVar):
             case _:
                 return super().pe_exp(e, env)
                 
-    def pe_stmt(self, s: statement, env: Set[expr]) -> expr:
+    def pe_stmt(self, s: stmt, env: Set[expr]) -> expr:
         match s:
             case If(exp1, stmt1, stmt2):
                 stmts1 = [self.pe_stmt(st, env) for st in stmt1]
@@ -68,7 +68,7 @@ class CompilerIf(CompilerVar):
     ######## Shrink
     ###############################################################
 
-    def shrink_exp(self, e: exp) -> exp:
+    def shrink_exp(self, e: expr) -> expr:
         match e:
             case Constant(value):
                 return e
@@ -198,6 +198,9 @@ class CompilerIf(CompilerVar):
                 newBody = self.explicate_effect(body, cont, basic_blocks)
                 newElse = self.explicate_effect(orelse, cont, basic_blocks)
                 newExpr = self.explicate_pred(test, newBody, newElse, basic_blocks)
+                print('xxxxxxxxxxxxxxxxxEffectxxxxxxxxxxxxxxx')
+                print(e, newExpr)
+                print('-----------')
                 return newExpr
             case Call(func, args):
                 block = self.create_block([Expr(e)] + force(cont), basic_blocks)
@@ -210,7 +213,7 @@ class CompilerIf(CompilerVar):
                 # return newBody + force(cont_block)
                 ss = self.explicate_effect(result, cont, basic_blocks)
                 for s in reversed(body):
-                    ss = self.explicate_stmts(s, ss, basic_blocks)
+                    ss = self.explicate_stmt(s, ss, basic_blocks)
                 return ss
             case _:
                 return cont
@@ -222,6 +225,9 @@ class CompilerIf(CompilerVar):
                 newBody = self.explicate_assign(body, lhs, next_block, basic_blocks)
                 newElse = self.explicate_assign(orelse, lhs, next_block, basic_blocks)
                 newRhs = self.explicate_pred(test, newBody, newElse, basic_blocks)
+                print('xxxxxxxxxxxxxxxxxAssignxxxxxxxxxxxxxxx')
+                print(rhs, newRhs)
+                print('---------------')
                 return newRhs
             case Begin(body, result):
                 ss = self.explicate_assign(result, lhs, cont, basic_blocks)
@@ -266,11 +272,10 @@ class CompilerIf(CompilerVar):
                 newPred = self.explicate_pred(test, newBody, newElse, basic_blocks)
                 return newPred
             case Begin(body, result):
-                newBody = []
+                ss = self.explicate_pred(result, thn, els, basic_blocks)
                 for s in reversed(body):
-                    newBody = self.explicate_stmt(s, newBody, basic_blocks)
-                newPred = self.explicate_pred(result, thn, els, basic_blocks)
-                return newBody + force(newPred) # todo
+                    ss = self.explicate_stmt(s, ss, basic_blocks)
+                return ss
             case _:
                 return [If(Compare(cnd, [Eq()], [Constant(True)]),
                     force(self.create_block(thn, basic_blocks)),
@@ -560,7 +565,7 @@ class CompilerIf(CompilerVar):
         curr_before = (curr_after - self.W(i)) | self.R(i) # - is set difference, | is union
         return [curr_before, curr_after]
 
-    def uncover_live(self, p: X86Program) -> Dict[instr : Set[location]]:
+    def uncover_live(self, p: X86Program) -> Dict[instr, Set[location]]:
         match p:
             case X86Program(blocks):
                 graph = DirectedAdjList()
@@ -629,7 +634,7 @@ class CompilerIf(CompilerVar):
             case _:
                 raise Exception ('error in add_edges + ', repr(i))
 
-    def add_ver(self, i: instr, graph: UnidrectedAdjList):
+    def add_ver(self, i: instr, graph: UndirectedAdjList):
         match i:
             case Instr(op, args):
                 for arg in args:
@@ -638,7 +643,7 @@ class CompilerIf(CompilerVar):
             case _:
                 return
 
-    def build_interference(self, p: X86Program, afterDict: Dict[instr: Set[location]]) -> UndirectedAdjList:
+    def build_interference(self, p: X86Program, afterDict: Dict[instr, Set[location]]) -> UndirectedAdjList:
         match p:
             case X86Program(blocks):
                 graph = UndirectedAdjList()
@@ -666,7 +671,7 @@ class CompilerIf(CompilerVar):
                 return True
         return False
 
-    def color_graph(self, graph: UndirectedAdjList, move_graph: UndirectedAdjList) -> Dict[Variable : int]:
+    def color_graph(self, graph: UndirectedAdjList, move_graph: UndirectedAdjList) -> Dict[Variable, int]:
         L = {}
         sat = {}
         returnDict = {}
@@ -733,7 +738,7 @@ class CompilerIf(CompilerVar):
         # return dictionary
         return returnDict
     
-    def allocate_registers(self, colors: Dict[Variable : int]):
+    def allocate_registers(self, colors: Dict[Variable, int]):
         returnDict = {}
         for k,v in colors.items():
             if v < 11:
@@ -755,7 +760,7 @@ class CompilerIf(CompilerVar):
             case _:
                 return
 
-    def build_move_graph(self, p:X86program) -> UndirectedAdjList:
+    def build_move_graph(self, p:X86Program) -> UndirectedAdjList:
         match p:
             case X86Program(blocks):
                 graph = UndirectedAdjList()
@@ -764,7 +769,7 @@ class CompilerIf(CompilerVar):
                         self.detect_move(i, graph)
                 return graph
             case _:
-                raise Exceptions ('error in build_move_graph + ', repr(p))
+                raise Exception ('error in build_move_graph + ', repr(p))
 
     ###############################################################
     ######## Assign Homes

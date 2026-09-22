@@ -41,7 +41,7 @@ class CompilerTup(CompilerWhile):
             case _:
                 return super().pe_exp(e, env)
                 
-    def pe_stmt(self, s: statement, env: Set[expr]) -> expr:
+    def pe_stmt(self, s: stmt, env: Set[expr]) -> expr:
         return super().pe_stmt(s, env)
 
     def partial_eval(self, p: Module) -> Module:
@@ -56,7 +56,7 @@ class CompilerTup(CompilerWhile):
     ######## Shrink
     ###############################################################
 
-    def shrink_exp(self, e: exp) -> exp:
+    def shrink_exp(self, e: expr) -> expr:
         match e:
             case Tuple(exp, Load()):
                 es = [self.shrink_exp(e) for e in exp]
@@ -83,7 +83,7 @@ class CompilerTup(CompilerWhile):
     ######## Expose Allocation
     ###############################################################
 
-    def expose_alloc(self, tup: List[expr], alloc: Allocate) -> exp:
+    def expose_alloc(self, tup: List[expr], alloc: Allocate) -> expr:
         l = len(tup)
         space = (l + 1) * 8
         arr = generate_name('alloc')
@@ -99,7 +99,7 @@ class CompilerTup(CompilerWhile):
         body = inits + [If(conditional, [], [Collect(space)])] + initialize + assignment
         return Begin(body, Name(arr))
 
-    def expose_exp(self, e: exp) -> exp:
+    def expose_exp(self, e: expr) -> expr:
         match e:
             case Name(id):
                 return e
@@ -132,8 +132,8 @@ class CompilerTup(CompilerWhile):
                 return Expr(self.expose_exp(exp))
             case If(arg1, arg2, arg3):
                 return If(self.expose_exp(arg1), [self.expose_stmt(s) for s in arg2], [self.expose_stmt(s) for s in arg3])
-            case While(arg1, arg2):
-                return While(self.expose_exp(arg1), [self.expose_stmt(s) for s in arg2])
+            case While(arg1, arg2, []):
+                return While(self.expose_exp(arg1), [self.expose_stmt(s) for s in arg2], [])
             case Assign(lhs, rhs):
                 return Assign(lhs, self.expose_exp(rhs))
             case _:
@@ -341,7 +341,7 @@ class CompilerTup(CompilerWhile):
             case GlobalValue(value):
                 return Global(label_name(value))
             case Subscript(arg1, arg2, Store()):
-                return 8(arg2 + 1)(arg1)
+                return 8*(arg2 + 1)*(arg1)
             case _:
                 return super().select_arg(e)
 
@@ -464,7 +464,7 @@ class CompilerTup(CompilerWhile):
         curr_before = (curr_after - self.W(i)) | self.R(i) # - is set difference, | is union
         return [curr_before, curr_after]
 
-    def uncover_live(self, p: X86Program) -> Dict[instr : Set[location]]:
+    def uncover_live(self, p: X86Program) -> Dict[instr, Set[location]]:
         match p:
             case X86Program(blocks):
                 live_before_dict_block = {}
@@ -532,10 +532,10 @@ class CompilerTup(CompilerWhile):
             case _:
                 return super().add_edges(i, graph, afterSet)
 
-    def add_ver(self, i: instr, graph: UnidrectedAdjList):
+    def add_ver(self, i: instr, graph: UndirectedAdjList):
         return super().add_ver(i, graph)
 
-    def build_interference(self, p: X86Program, afterDict: Dict[instr: Set[location]]) -> UndirectedAdjList:
+    def build_interference(self, p: X86Program, afterDict: Dict[instr, Set[location]]) -> UndirectedAdjList:
         self.var_types = p.var_types
         match p:
             case X86Program(blocks):
@@ -561,10 +561,10 @@ class CompilerTup(CompilerWhile):
     def has_colored_neighbor(self, node, sat, move_graph, colors):
         return super().has_colored_neighbor(node, sat, move_graph, colors)
 
-    def color_graph(self, graph: UndirectedAdjList, move_graph: UndirectedAdjList) -> Dict[Variable : int]:
+    def color_graph(self, graph: UndirectedAdjList, move_graph: UndirectedAdjList) -> Dict[Variable, int]:
         return super().color_graph(graph, move_graph)
 
-    def allocate_registers(self, colors: Dict[Variable : int]):
+    def allocate_registers(self, colors: Dict[Variable, int]):
         returnDict = {}
         for k,v in colors.items():
             if v < 11:
@@ -584,7 +584,7 @@ class CompilerTup(CompilerWhile):
     def detect_move(self, i: instr, graph: UndirectedAdjList):
         return super().detect_move(i, graph)
 
-    def build_move_graph(self, p:X86program) -> UndirectedAdjList:
+    def build_move_graph(self, p: X86Program) -> UndirectedAdjList:
         match p:
             case X86Program(blocks):
                 graph = UndirectedAdjList()
@@ -593,7 +593,7 @@ class CompilerTup(CompilerWhile):
                         self.detect_move(i, graph)
                 return graph
             case _:
-                raise Exceptions ('error in build_move_graph + ', repr(p))
+                raise Exception ('error in build_move_graph + ', repr(p))
 
     ###############################################################
     ######## Assign Homes

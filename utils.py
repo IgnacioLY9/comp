@@ -6,6 +6,8 @@ from ast import *
 from dataclasses import dataclass
 from customParser import parse_tree_to_ast, parse_lark
 
+import typing
+
 # move these to the compilers, use a method with overrides -Jeremy
 builtin_functions = \
     {'input_int', 'print',
@@ -1274,6 +1276,7 @@ def compile_and_test(compiler, compiler_name,
         trace('\n# ' + passname + '\n')
         program = compiler.reveal_functions(program)
         trace(program)
+        trace('')
         if passname in type_check_dict.keys():
             type_check_dict[passname](program)
         total_passes += 1

@@ -50,7 +50,7 @@ class CompilerVar:
             case Add():
               return BinOp(Constant(n1), Add(), BinOp(right, Add(), inert))
             case Sub():
-              return BinOp(Constant(n1), Add(), BinOp(UnaryOp(Usub(), right), Add(), inert))
+              return BinOp(Constant(n1), Add(), BinOp(UnaryOp(USub(), right), Add(), inert))
             case _:
               raise Exception ("pe_add has unexpected operation + ", repr(r1))
         case (inert, BinOp(Constant(n1), op, right)):
@@ -58,7 +58,7 @@ class CompilerVar:
             case Add():
               return BinOp(Constant(n1), Add(), BinOp(right, Add(), inert))
             case Sub():
-              return BinOp(Constant(n1), Add(), BinOp(UnaryOp(Usub(), right), Add(), inert))
+              return BinOp(Constant(n1), Add(), BinOp(UnaryOp(USub(), right), Add(), inert))
             case _:
               raise Exception ("pe_add has unexpected operation + ", repr(r1))
         case (inert, Constant(n2)):
@@ -99,9 +99,9 @@ class CompilerVar:
         case (inert, BinOp(Constant(n1), op, right)):
           match op:
             case Add():
-              return BinOp(Constant(neg64(n1)), Add(), BinOp(intert, Sub(), right))
+              return BinOp(Constant(neg64(n1)), Add(), BinOp(inert, Sub(), right))
             case Sub():
-              return BinOp(Constant(neg(n1)), Add(), BinOp(inert, Add(), right))
+              return BinOp(Constant(neg64(n1)), Add(), BinOp(inert, Add(), right))
             case _:
               raise Exception ("pe_add has unexpected operation + ", repr(r1))
         case (inert, Constant(n2)):
@@ -123,6 +123,8 @@ class CompilerVar:
           return e
         case Call(Name('input_int'), []):
           return e
+        case _:
+          raise Exception ('error in pe_exp + ', repr(e))
   
     def pe_stmt(self, s: stmt, env: Set[expr]) -> stmt:
       match s:
@@ -436,7 +438,7 @@ class CompilerVar:
         curr_before = (curr_after - self.W(i)) | self.R(i) # - is set difference, | is union
         return [curr_before, curr_after]
 
-    def uncover_live(self, p: X86Program) -> Dict[instr : Set[location]]:
+    def uncover_live(self, p: X86Program) -> Dict[instr, Set[location]]:
         match p:
             case X86Program(body):
                 returnDict = {}
@@ -471,7 +473,7 @@ class CompilerVar:
             case _:
                 raise Exception ('error in add_edges + ', repr(i))
 
-    def add_ver(self, i: instr, graph: UnidrectedAdjList):
+    def add_ver(self, i: instr, graph: UndirectedAdjList):
         match i:
             case Instr(op, args):
                 for arg in args:
@@ -480,7 +482,7 @@ class CompilerVar:
             case _:
                 return
 
-    def build_interference(self, p: X86Program, afterDict: Dict[instr: Set[location]]) -> UndirectedAdjList:
+    def build_interference(self, p: X86Program, afterDict: Dict[instr, Set[location]]) -> UndirectedAdjList:
         match p:
             case X86Program(body):
                 graph = UndirectedAdjList()
@@ -507,7 +509,7 @@ class CompilerVar:
                 return True
         return False
 
-    def color_graph(self, graph: UndirectedAdjList, move_graph: UndirectedAdjList) -> Dict[Variable : int]:
+    def color_graph(self, graph: UndirectedAdjList, move_graph: UndirectedAdjList) -> Dict[Variable, int]:
         L = {}
         sat = {}
         returnDict = {}
@@ -574,7 +576,7 @@ class CompilerVar:
         # return dictionary
         return returnDict
     
-    def allocate_registers(self, colors: Dict[Variable : int]):
+    def allocate_registers(self, colors: Dict[Variable, int]):
         returnDict = {}
         for k,v in colors.items():
             if v < 11:
@@ -596,7 +598,7 @@ class CompilerVar:
             case _:
                 return
 
-    def build_move_graph(self, p:X86program) -> UndirectedAdjList:
+    def build_move_graph(self, p:X86Program) -> UndirectedAdjList:
         match p:
             case X86Program(body):
                 graph = UndirectedAdjList()
@@ -604,7 +606,7 @@ class CompilerVar:
                     self.detect_move(i, graph)
                 return graph
             case _:
-                raise Exceptions ('error in build_move_graph + ', repr(p))
+                raise Exception ('error in build_move_graph + ', repr(p))
 
     ############################################################################
     # Find Stackframe size

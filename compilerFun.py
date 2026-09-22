@@ -9,12 +9,12 @@ import os
 from typing import List, Set, Dict
 from typing import Tuple as Tup
 
-from compilerTup import CompilerTup
+from compilerArray import CompilerArray
 
 Binding = Tup[Name, expr]
 Temporaries = List[Binding]
 
-class CompilerArray(CompilerTup):
+class CompilerFun(CompilerArray):
 
     ###############################################################
     ######## Partial Eval
@@ -30,28 +30,23 @@ class CompilerArray(CompilerTup):
         return super().pe_sub(e1, e2)
 
     def pe_mult(self, e1: expr, e2: expr) -> expr:
-        match (e1, e2):
-            case (Constant(n1), Constant(n2)):
-                return Constant(mul64(n1,n2))
-            case _:
-                return BinOp(e1, Mult(), e2)
+        return super().pe_mult(e1, e2)
 
     def pe_exp(self, e: expr, env: Set[expr]) -> expr:
         match e:
-            case BinOp(left, Mult(), right):
-                return self.pe_mult(self.pe_exp(left, env), self.pe_exp(right, env))
-            case Subscript(arg1, arg2, Load()):
-                return Subscript(self.pe_exp(arg1, env), self.pe_exp(arg2, env), Load())
-            case ast.List(args, Load()):
-                es = [self.pe_exp(a, env) for a in args]
-                return ast.List(es, Load())
+            case Call(e1, args):
+                new_args = [self.pe_exp(a, env) for a in args]
+                return Call(self.pe_exp(e1, env), new_args)
             case _:
                 return super().pe_exp(e, env)
                 
     def pe_stmt(self, s: stmt, env: Set[expr]) -> expr:
         match s:
-            case Assign([Subscript(arg1, arg2, Store())], arg3):
-                return Assign([Subscript(self.pe_exp(arg1, env), self.pe_exp(arg2, env), Store())], self.pe_exp(arg3, env))
+            case Return(e1):
+                return Return(self.pe_exp(e1, env))
+            case FunctionDef(name, params, body, dl, returns, comment):
+                newStmts = [self.pe_stmt(s, env) for s in body]
+                return FunctionDef(name, params, newStmts, dl, returns, comment)
             case _:
                 return super().pe_stmt(s, env)
 
@@ -69,20 +64,21 @@ class CompilerArray(CompilerTup):
 
     def shrink_exp(self, e: expr) -> expr:
         match e:
-            case BinOp(left, Mult(), right):
-                return BinOp(self.shrink_exp(left), Mult(), self.shrink_exp(right))
-            case Subscript(arg1, arg2, Load()):
-                return Subscript(self.shrink_exp(arg1), self.shrink_exp(arg2), Load())
-            case ast.List(args, Load()):
-                es = [self.shrink_exp(a) for a in args]
-                return ast.List(es, Load())
+            case Call(Name('input_int'), []):
+                return super().shrink_exp(e)
+            case Call(func, args):
+                new_args = [self.shrink_exp(a) for a in args]
+                return Call(self.shrink_exp(func), new_args)
             case _:
                 return super().shrink_exp(e)
 
     def shrink_stmt(self, s: stmt) -> stmt:
         match s:
-            case Assign([Subscript(arg1, arg2, Store())], arg3):
-                return Assign([Subscript(self.shrink_exp(arg1), self.shrink_exp(arg2), Store())], self.shrink_exp(arg3))
+            case Return(e1):
+                return Return(self.shrink_exp(e1))
+            case FunctionDef(name, params, body, dl, returns, comment):
+                newBody = [self.shrink_stmt(b) for b in body]
+                return FunctionDef(name, params, newBody, dl, returns, comment)
             case _:
                 return super().shrink_stmt(s)
 
@@ -90,9 +86,89 @@ class CompilerArray(CompilerTup):
         match p:
             case Module(body):
                 stmts = [self.shrink_stmt(stmt) for stmt in body]
-                return Module(stmts)
+                newBody = []
+                funDefs = []
+                for s in stmts:
+                    if isinstance(s, FunctionDef):
+                        funDefs.append(s)
+                    else:
+                        newBody.append(s)
+                return Module(funDefs + [FunctionDef('main', [], newBody + [Return(Constant(0))], None, IntType(), None)])
             case _:
                 raise Exception ('error in shrink + ', repr(p))
+
+    ###############################################################
+    ######## Reveal Functions
+    ###############################################################
+    
+    # functionToArity = {'input_int' : 0, 'print' : 1, 'len' : 1, 'array_load' : 2, 'array_store' : 3}
+    functionToArity = {}
+
+    def reveal_exp(self, e: expr) -> expr:
+        match e:
+            case Constant(value):
+                return e
+            case UnaryOp(op, exp):
+                return UnaryOp(op, self.reveal_exp(exp))
+            case BinOp(exp1, op, exp2):
+                return BinOp(self.reveal_exp(exp1), op, self.reveal_exp(exp2))
+            case Name(var):
+                if var in self.functionToArity:
+                    return FunRef(var, self.functionToArity[var])
+                return e
+            case BoolOp(boolop, [exp1, exp2]):
+                return BoolOp(boolop, [self.reveal_exp(exp1), self.reveal_exp(exp2)])
+            case Compare(exp1, [cmp], [exp2]):
+                return Compare(self.reveal_exp(exp1), [cmp], [self.reveal_exp(exp2)])
+            case IfExp(exp1, exp2, exp3):
+                return IfExp(self.reveal_exp(exp1), self.reveal_exp(exp2), self.reveal_exp(exp3))
+            case Tuple(exps, Load()):
+                es = [self.reveal_exp(exp) for exp in exps]
+                return Tuple(es, Load())
+            case Subscript(exp1, exp2, Load()):
+                return Subscript(self.reveal_exp(exp1), self.reveal_exp(exp2), Load())
+            case ast.List(exps, Load()):
+                es = [self.reveal_exp(exp) for exp in exps]
+                return ast.List(es, Load())
+            case Call(name, args):
+                newName = self.reveal_exp(name)
+                newArgs = [self.reveal_exp(a) for a in args]
+                return Call(newName, newArgs)
+            case _:
+                raise Exception ('error in resolve_exp + ', repr(e))
+
+    def reveal_stmt(self, s: stmt) -> stmt:
+        match s:
+            case Assign([Subscript(exp1, exp2, Store())], exp3):
+                return Assign([Subscript(self.reveal_exp(exp1), self.reveal_exp(exp2), Store())], self.reveal_exp(exp3))
+            case While(exp, stmts, []):
+                es = [self.reveal_stmt(stmt) for stmt in stmts]
+                return While(self.reveal_exp(exp), es, [])
+            case If(exp, stmts1, stmts2):
+                es1 = [self.reveal_stmt(stmt) for stmt in stmts1]
+                es2 = [self.reveal_stmt(stmt) for stmt in stmts2]
+                return If(self.reveal_exp(exp), es1, es2)
+            case Assign([Name(var)], exp):
+                return Assign([Name(var)], self.reveal_exp(exp))
+            case Expr(exp):
+                return Expr(self.reveal_exp(exp))
+            case Return(e):
+                return Return(self.reveal_exp(e))
+            case FunctionDef(name, params, body, dl, returns, comment):
+                self.functionToArity[name] = len(params)
+                newBody = [self.reveal_stmt(b) for b in body]
+                return FunctionDef(name, params, newBody, dl, returns, comment)
+            case _:
+                raise Exception ('error in resolve_stmt + ', repr(s))
+
+    def reveal_functions(self, p: Module) -> Module:
+        match p:
+            case Module(body):
+                stmts = [self.reveal_stmt(stmt) for stmt in body]
+                return Module(stmts)
+            case _:
+                raise Exception ('error in reveal_functions + ', repr(p))
+
 
     ###############################################################
     ######## Resolve
@@ -100,63 +176,29 @@ class CompilerArray(CompilerTup):
 
     def resolve_exp(self, e: expr) -> expr:
         match e:
-            case Constant(value):
+            case FunRef(name, arity):
                 return e
             case Call(Name('input_int'),[]):
-                return e
+                return super().resolve_exp(e)
             case Call(Name('print'), [exp]):
-                return Call(Name('print'), [self.resolve_exp(exp)])
-            case UnaryOp(op, exp):
-                return UnaryOp(op, self.resolve_exp(exp))
-            case BinOp(exp1, op, exp2):
-                return BinOp(self.resolve_exp(exp1), op, self.resolve_exp(exp2))
-            case Name(var):
-                return e
-            case BoolOp(boolop, [exp1, exp2]):
-                return BoolOp(boolop, [self.resolve_exp(exp1), self.resolve_exp(exp2)])
-            case Compare(exp1, [cmp], [exp2]):
-                return Compare(self.resolve_exp(exp1), [cmp], [self.resolve_exp(exp2)])
-            case IfExp(exp1, exp2, exp3):
-                return IfExp(self.resolve_exp(exp1), self.resolve_exp(exp2), self.resolve_exp(exp3))
-            case Tuple(exps, Load()):
-                es = [self.resolve_exp(exp) for exp in exps]
-                return Tuple(es, Load())
+                return super().resolve_exp(e)
             case Call(Name('len'),[exp]):
-                if isinstance(exp.has_type, ListType):
-                    return Call(Name('array_len'), [self.resolve_exp(exp)])
-                else:
-                    return Call(Name('len'), [self.resolve_exp(exp)])
-            case Subscript(exp1, exp2, Load()):
-                if isinstance(exp1.has_type, ListType):
-                    return Call(Name('array_load'), [self.resolve_exp(exp1), self.resolve_exp(exp2)])
-                else:
-                    return Subscript(self.resolve_exp(exp1), self.resolve_exp(exp2), Load())
-            case ast.List(exps, Load()):
-                es = [self.resolve_exp(exp) for exp in exps]
-                return ast.List(es, Load())
+                return super().resolve_exp(e)
+            case Call(fun, args):
+                newArgs = [self.resolve_exp(a) for a in args]
+                return Call(fun, args)
             case _:
-                raise Exception ('error in resolve_exp + ', repr(e))
+                return super().resolve_exp(e)
 
     def resolve_stmt(self, s: stmt) -> stmt:
         match s:
-            case Assign([Subscript(exp1, exp2, Store())], exp3):
-                if isinstance(exp1.has_type, ListType):
-                    return Expr(Call(Name('array_store'), [self.resolve_exp(exp1), self.resolve_exp(exp2), self.resolve_exp(exp3)]))
-                else:
-                    return Assign([Subscript(self.resolve_exp(exp1), self.resolve_exp(exp2), Store())], self.resolve_exp(exp3))
-            case While(exp, stmts, []):
-                es = [self.resolve_stmt(stmt) for stmt in stmts]
-                return While(self.resolve_exp(exp), es, [])
-            case If(exp, stmts1, stmts2):
-                es1 = [self.resolve_stmt(stmt) for stmt in stmts1]
-                es2 = [self.resolve_stmt(stmt) for stmt in stmts2]
-                return If(self.resolve_exp(exp), es1, es2)
-            case Assign([Name(var)], exp):
-                return Assign([Name(var)], self.resolve_exp(exp))
-            case Expr(exp):
-                return Expr(self.resolve_exp(exp))
+            case Return(e1):
+                return Return(self.resolve_exp(e1))
+            case FunctionDef(name, params, body, dl, returns, comment):
+                newBody = [self.resolve_stmt(b) for b in body]
+                return FunctionDef(name, params, newBody, dl, returns, comment)
             case _:
-                raise Exception ('error in resolve_stmt + ', repr(s))
+                return super().resolve_stmt(s)
 
     def resolve(self, p: Module) -> Module:
         match p:
@@ -172,71 +214,35 @@ class CompilerArray(CompilerTup):
 
     def cb_exp(self, e: expr) -> expr:
         match e:
-            case Constant(value):
+            case FunRef(name, arity):
                 return e
             case Call(Name('input_int'),[]):
-                return e
+                return super().cb_exp(e)
             case Call(Name('print'), [exp]):
-                return Call(Name('print'), [self.cb_exp(exp)])
+                return super().cb_exp(e)
             case Call(Name('len'),[exp]):
-                return Call(Name('len'), [self.cb_exp(exp)])
+                return super().cb_exp(e)
             case Call(Name('array_len'), [tup]):
-                return Call(Name('array_len'), [self.cb_exp(tup)])
+                return super().cb_exp(e)
             case Call(Name('array_load'), [tup, idx]):
-                tup = self.cb_exp(tup)
-                idx = self.cb_exp(idx)
-                first = Compare(idx, [GtE()], [Constant(0)])
-                second = Compare(Call(Name('array_len'), [tup]), [Gt()], [idx])
-                test = IfExp(first, second, Constant(False))
-                return IfExp(test, Call(Name('array_load'), [tup, idx]), Call(Name('exit'), [])) # exit(0) ?
+                return super().cb_exp(e)
             case Call(Name('array_store'), [tup, idx, val]):
-                tup = self.cb_exp(tup)
-                idx = self.cb_exp(idx)
-                val = self.cb_exp(val)
-                first = Compare(idx, [GtE()], [Constant(0)])
-                second = Compare(Call(Name('array_len'), [tup]), [Gt()], [idx])
-                test = IfExp(first, second, Constant(False))
-                return IfExp(test, Call(Name('array_store'), [tup, idx, val]), Call(Name('exit'), [])) # exit(0) ?
-            case UnaryOp(op, exp):
-                return UnaryOp(op, self.cb_exp(exp))
-            case BinOp(exp1, op, exp2):
-                return BinOp(self.cb_exp(exp1), op, self.cb_exp(exp2))
-            case Name(var):
-                return e
-            case BoolOp(boolop, [exp1, exp2]):
-                return BoolOp(boolop, [self.exp_exp(exp1), self.exp_exp(exp2)])
-            case Compare(exp1, [cmp], [exp2]):
-                return Compare(self.cb_exp(exp1), [cmp], [self.cb_exp(exp2)])
-            case IfExp(exp1, exp2, exp3):
-                return IfExp(self.cb_exp(exp1), self.cb_exp(exp2), self.cb_exp(exp3))
-            case Tuple(exps, Load()):
-                es = [self.cb_exp(exp) for exp in exps]
-                return Tuple(es, Load())
-            case Subscript(exp1, exp2, Load()):
-                return Subscript(self.cb_exp(exp1), self.cb_exp(exp2), Load())
-            case ast.List(exps, Load()):
-                es = [self.cb_exp(exp) for exp in exps]
-                return ast.List(es, Load())
+                return super().cb_exp(e)
+            case Call(fun, args):
+                newArgs = [self.cb_exp(a) for a in args]
+                return Call(fun, newArgs)
             case _:
-                raise Exception ('error in cb_exp + ', repr(e))
+                return super().cb_exp(e)
 
     def cb_stmt(self, s: stmt) -> stmt:
         match s:
-            case Assign([Subscript(exp1, exp2, Store())], exp3):
-                return Assign([Subscript(self.cb_exp(exp1), self.cb_exp(exp2), Store())], self.cb_exp(exp3))
-            case While(exp, stmts, []):
-                es = [self.cb_stmt(stmt) for stmt in stmts]
-                return While(self.cb_exp(exp), es, [])
-            case If(exp, stmts1, stmts2):
-                es1 = [self.cb_stmt(stmt) for stmt in stmts1]
-                es2 = [self.cb_stmt(stmt) for stmt in stmts2]
-                return If(self.cb_exp(exp), es1, es2)
-            case Assign([Name(var)], exp):
-                return Assign([Name(var)], self.cb_exp(exp))
-            case Expr(exp):
-                return Expr(self.cb_exp(exp))
+            case Return(e1):
+                return Return(self.cb_exp(e1))
+            case FunctionDef(name, params, body, dl, returns, comment):
+                newBody = [self.cb_stmt(b) for b in body]
+                return FunctionDef(name, params, newBody, dl, returns, comment)
             case _:
-                raise Exception ('error in cb_stmt + ', repr(s))
+                return super().cb_stmt(s)
 
     def check_bounds(self, p: Module) -> Module:
         match p:
@@ -245,6 +251,12 @@ class CompilerArray(CompilerTup):
                 return Module(stmts)
             case _:
                 raise Exception ('error in check_bounds + ', repr(p))
+
+    ###############################################################
+    ######## Limit Functions
+    ###############################################################
+    
+
 
     ###############################################################
     ######## Expose Allocation

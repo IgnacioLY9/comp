@@ -31,7 +31,7 @@ class CompilerWhile(CompilerIf):
     def pe_exp(self, e: expr, env: Set[expr]) -> expr:
         return super().pe_exp(e, env)
                 
-    def pe_stmt(self, s: statement, env: Set[expr]) -> expr:
+    def pe_stmt(self, s: stmt, env: Set[expr]) -> expr:
         match s:
             case While(arg1, arg2, []):
                 stmts = [self.pe_stmt(arg, env) for arg in arg2]
@@ -51,7 +51,7 @@ class CompilerWhile(CompilerIf):
     ######## Shrink
     ###############################################################
 
-    def shrink_exp(self, e: exp) -> exp:
+    def shrink_exp(self, e: expr) -> expr:
         return super().shrink_exp(e)
 
     def shrink_stmt(self, s: stmt) -> stmt:
@@ -306,7 +306,7 @@ class CompilerWhile(CompilerIf):
         curr_before = (curr_after - self.W(i)) | self.R(i) # - is set difference, | is union
         return [curr_before, curr_after]
 
-    def uncover_live(self, p: X86Program) -> Dict[instr : Set[location]]:
+    def uncover_live(self, p: X86Program) -> Dict[instr, Set[location]]:
         match p:
             case X86Program(blocks):
                 live_before_dict_block = {}
@@ -365,10 +365,10 @@ class CompilerWhile(CompilerIf):
     def add_edges(self, i: instr, graph: UndirectedAdjList, afterSet: Set[location]):
         return super().add_edges(i, graph, afterSet)
 
-    def add_ver(self, i: instr, graph: UnidrectedAdjList):
+    def add_ver(self, i: instr, graph: UndirectedAdjList):
         return super().add_ver(i, graph)
 
-    def build_interference(self, p: X86Program, afterDict: Dict[instr: Set[location]]) -> UndirectedAdjList:
+    def build_interference(self, p: X86Program, afterDict: Dict[instr, Set[location]]) -> UndirectedAdjList:
         match p:
             case X86Program(blocks):
                 graph = UndirectedAdjList()
@@ -393,10 +393,10 @@ class CompilerWhile(CompilerIf):
     def has_colored_neighbor(self, node, sat, move_graph, colors):
         return super().has_colored_neighbor(node, sat, move_graph, colors)
 
-    def color_graph(self, graph: UndirectedAdjList, move_graph: UndirectedAdjList) -> Dict[Variable : int]:
+    def color_graph(self, graph: UndirectedAdjList, move_graph: UndirectedAdjList) -> Dict[Variable, int]:
         return super().color_graph(graph, move_graph)
 
-    def allocate_registers(self, colors: Dict[Variable : int]):
+    def allocate_registers(self, colors: Dict[Variable, int]):
         returnDict = {}
         for k,v in colors.items():
             if v < 11:
@@ -413,7 +413,7 @@ class CompilerWhile(CompilerIf):
     def detect_move(self, i: instr, graph: UndirectedAdjList):
         return super().detect_move(i, graph)
 
-    def build_move_graph(self, p:X86program) -> UndirectedAdjList:
+    def build_move_graph(self, p:X86Program) -> UndirectedAdjList:
         match p:
             case X86Program(blocks):
                 graph = UndirectedAdjList()
@@ -422,7 +422,7 @@ class CompilerWhile(CompilerIf):
                         self.detect_move(i, graph)
                 return graph
             case _:
-                raise Exceptions ('error in build_move_graph + ', repr(p))
+                raise Exception ('error in build_move_graph + ', repr(p))
 
     ###############################################################
     ######## Assign Homes

@@ -255,8 +255,94 @@ class CompilerFun(CompilerArray):
     ###############################################################
     ######## Limit Functions
     ###############################################################
-    
 
+    def limit_functions_exp(self, e: expr, env: Dict[str, Tup[expr, int]]) -> expr:
+        match e:
+            case Constant(value):
+                return e
+            case UnaryOp(op, exp):
+                return UnaryOp(op, self.limit_functions_exp(exp, env))
+            case BinOp(exp1, op, exp2):
+                return BinOp(self.limit_functions_exp(exp1, env), op, self.limit_functions_exp(exp2, env))
+            case Name(var):
+                if var in env:
+                    tup_name, idx = env[var]
+                    return Subscript(tup_name, Constant(idx), Load())
+                else:
+                    return e
+            case FunRef(name, arity):
+                return e
+            case BoolOp(boolop, [exp1, exp2]):
+                return BoolOp(boolop, [self.limit_functions_exp(exp1, env), self.limit_functions_exp(exp2, env)])
+            case Compare(exp1, [cmp], [exp2]):
+                return Compare(self.limit_functions_exp(exp1, env), [cmp], [self.limit_functions_exp(exp2, env)])
+            case IfExp(exp1, exp2, exp3):
+                return IfExp(self.limit_functions_exp(exp1, env), self.limit_functions_exp(exp2, env), self.limit_functions_exp(exp3, env))
+            case Tuple(exps, Load()):
+                es = [self.limit_functions_exp(exp, env) for exp in exps]
+                return Tuple(es, Load())
+            case Subscript(exp1, exp2, Load()):
+                return Subscript(self.limit_functions_exp(exp1, env), self.limit_functions_exp(exp2, env), Load())
+            case ast.List(exps, Load()):
+                es = [self.limit_functions_exp(exp, env) for exp in exps]
+                return ast.List(es, Load())
+            case Call(name, args):
+                newName = self.limit_functions_exp(name, env)
+                newArgs = [self.limit_functions_exp(a, env) for a in args]
+                if len(args) <= 6:
+                    return Call(newName, newArgs)
+                else:
+                    initArgs = newArgs[:5]
+                    tailArgs = newArgs[5:]
+                    return Call(newName, initArgs + [Tuple(tailArgs, Load())])
+            case _:
+                raise Exception ('error in limit_functions_exp + ', repr(e))
+
+    def limit_functions_stmt(self, s: stmt, env: Dict[str, Tup[expr, int]]) -> stmt:
+        match s:
+            case Assign([Subscript(exp1, exp2, Store())], exp3):
+                return Assign([Subscript(self.limit_functions_exp(exp1, env), self.limit_functions_exp(exp2, env), Store())], self.limit_functions_exp(exp3, env))
+            case While(exp, stmts, []):
+                es = [self.limit_functions_stmt(stmt, env) for stmt in stmts]
+                return While(self.limit_functions_exp(exp, env), es, [])
+            case If(exp, stmts1, stmts2):
+                es1 = [self.limit_functions_stmt(stmt, env) for stmt in stmts1]
+                es2 = [self.limit_functions_stmt(stmt, env) for stmt in stmts2]
+                return If(self.limit_functions_exp(exp, env), es1, es2)
+            case Assign([Name(var)], exp):
+                return Assign([Name(var)], self.limit_functions_exp(exp, env))
+            case Expr(exp):
+                return Expr(self.limit_functions_exp(exp, env))
+            case Return(e):
+                return Return(self.limit_functions_exp(e, env))
+            case FunctionDef(name, params, body, dl, returns, comment):
+                if len(params) <= 6:
+                    new_body = [self.limit_functions_stmt(st, {}) for st in body]
+                    return FunctionDef(name, params, new_body, dl, returns, comment)
+                else:
+                    new_env = {}
+                    init_params = params[:5]
+                    tail_params = params[5:]
+                    tuple_type = TupleType([t for (x,t) in tail_params])
+                    newTup = generate_name('tup')
+                    i = 0
+                    for (x,t) in tail_params:
+                        new_env[x] = (Name(newTup), i)
+                        i += 1
+                    newbody = [self.limit_functions_stmt(st, new_env) for st in body]
+                    newParams = init_params + [(newTup, tuple_type)]
+                    return FunctionDef(name, newParams, newbody, dl, returns, comment)
+
+            case _:
+                raise Exception ('error in limit_functions_stmt + ', repr(s))
+
+    def limit_functions(self, p: Module) -> Module:
+        match p:
+            case Module(body):
+                stmts = [self.limit_functions_stmt(stmt, {}) for stmt in body]
+                return Module(stmts)
+            case _:
+                raise Exception ('error in limit_functions + ', repr(p))
 
     ###############################################################
     ######## Expose Allocation
@@ -266,34 +352,22 @@ class CompilerFun(CompilerArray):
         return super().expose_alloc(tup, alloc)
 
     def expose_alloc_array(self, arr: List[expr], alloc: AllocateArray) -> expr:
-        l = len(arr)
-        space = (l + 1) * 8
-        array = generate_name('alloc_arr')
-        init_vars = [generate_name('init_arr') for a in arr]
-        inits = []
-        for i in range(l):
-            inits += [Assign([Name(init_vars[i])], arr[i])]
-        conditional = Compare(BinOp(GlobalValue('free_ptr'), Add(), Constant(space)),[Lt()], [GlobalValue('fromspace_end')])
-        initialize = [Assign([Name(array)], alloc)]
-        assignment = []
-        for i in range(l):
-            assignment += [Assign([Subscript(Name(array), Constant(i), Store())], Name(init_vars[i]))]
-        body = inits + [If(conditional, [], [Collect(space)])] + initialize + assignment
-        return Begin(body, Name(array))
+        return super().expose_alloc_array(arr, alloc)
 
     def expose_exp(self, e: expr) -> expr:
         match e:
-            case ast.List(arg, Load()):
-                new_body = [self.expose_exp(ex) for ex in arg]
-                alloc = AllocateArray(len(new_body), e.has_type)
-                return self.expose_alloc_array(new_body, alloc)
+            case Call(FunRef(name, arity), args):
+                return Call(FunRef(name, arity), [self.expose_exp(ex) for ex in args])
             case _:
                 return super().expose_exp(e)
 
     def expose_stmt(self, s: stmt) -> stmt:
         match s:
-            case Assign([Subscript(exp1, exp2, Store())], exp3):
-                return Assign([Subscript(self.expose_exp(exp1), self.expose_exp(exp2), Store())], self.expose_exp(exp3))
+            case Return(value):
+                return Return(self.expose_exp(value))
+            case FunctionDef(name, params, body, dl, returns, comment):
+                newBody = [self.expose_stmt(st) for st in body]
+                return FunctionDef(name, params, newBody, dl, returns, comment)
             case _:
                 return super().expose_stmt(s)
 

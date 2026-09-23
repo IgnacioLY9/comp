@@ -28,6 +28,8 @@ typecheck_dict = {
     'shrink': typecheck_L,
     'reveal_functions': typecheck_L,
     'resolve': typecheck_L,
+    'check_bounds': typecheck_L,
+    'limit_functions': typecheck_L,
     'expose_allocation': typecheck_L,
     'remove_complex_operands': typecheck_L,
     'explicate_control': typecheck_C,
@@ -48,7 +50,7 @@ interp_dict = {
     # 'prelude_and_conclusion': interp_x86,
 }
 
-run_one_test(os.getcwd() + '/tests/fun/t1.py',
+run_one_test(os.getcwd() + '/tests/fun/t2.py',
                  'fun',
                  compiler,
                  'fun',

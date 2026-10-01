@@ -356,6 +356,8 @@ class CompilerFun(CompilerArray):
 
     def expose_exp(self, e: expr) -> expr:
         match e:
+            case FunRef(name, arity):
+                return e
             case Call(FunRef(name, arity), args):
                 return Call(FunRef(name, arity), [self.expose_exp(ex) for ex in args])
             case _:
@@ -385,33 +387,55 @@ class CompilerFun(CompilerArray):
 
     def rco_exp(self, e: expr, need_atomic : bool) -> Tup[expr, Temporaries]:
         match e:
-            case Call(Name('array_len'), [tup]):
-                newVar1, newMap1 = self.rco_exp(tup, True)
-                newTemp = Name(generate_name('tmp'))
-                return newTemp, newMap1 + [Assign([newTemp], Call(Name('array_len'), [newVar1]))]
-            case Call(Name('array_load'), [tup, idx]):
-                newVar1, newMap1 = self.rco_exp(tup, True)
-                newVar2, newMap2 = self.rco_exp(idx, True)
-                newTemp = Name(generate_name('tmp'))
-                return newTemp, newMap1 + newMap2 + [Assign([newTemp], Call(Name('array_load'), [newVar1, newVar2]))]
-            case Call(Name('array_store'), [tup, idx, val]):
-                newVar1, newMap1 = self.rco_exp(tup, True)
-                newVar2, newMap2 = self.rco_exp(idx, True)
-                newVar3, newMap3 = self.rco_exp(val, True)
-                return Call(Name('array_store'), [newVar1, newVar2, newVar3]), newMap1 + newMap2 + newMap3
-            case AllocateArray(arg1, t):
+            case FunRef(name, arity):
                 if need_atomic:
-                    temp = Name(generate_name('tmp'))
-                    return temp, [Assign([temp], e)]
+                    newTemp = Name(generate_name('tmp'))
+                    return newTemp, [Assign([newTemp], FunRef(name, arity))]
                 else:
                     return e, []
-            case Call(Name('exit'), []):
-                return e, []
+            case Call(Name(fun), args):
+                if fun in builtin_functions:
+                    return super().rco_exp(e, need_atomic)
+                else:
+                    newFunc, newMap1 = self.rco_exp(Name(fun), True)
+                    newArgs = []
+                    argMaps = []
+                    for arg in args:
+                        newVar, newMap = self.rco_exp(arg, True)
+                        newArgs.append(newVar)
+                        argMaps.append(newMap)
+                    argMaps = sum(argMaps, [])
+                    if need_atomic:
+                        newTemp = Name(generate_name('tmp'))
+                        return newTemp, newMap1 + argMaps + [Assign([newTemp], Call(newFunc, newArgs))]
+                    else:
+                        return Call(newFunc, newArgs), argMaps
+            case Call(FunRef(name, arity), args):
+                newVars = []
+                newMaps = []
+                for arg in args:
+                    newVar, newMap = self.rco_exp(arg, True)
+                    newVars.append(newVar)
+                    newMaps.append(newMap)
+                newMaps = sum(newMaps, [])
+                if need_atomic:
+                    newTemp = Name(generate_name('tmp'))
+                    return newTemp, newMaps + [Assign([newTemp], Call(FunRef(name, arity), newVars))]
+                else:
+                    return Call(FunRef(name, arity), newVars), newMaps
             case _:
                 return super().rco_exp(e, need_atomic)
 
     def rco_stmt(self, s: stmt) -> List[stmt]:
-        return super().rco_stmt(s)
+        match s:
+            case Return(value):
+                newVar, newMap = self.rco_exp(value, False)
+                return newMap + [Return(newVar)]
+            case FunctionDef(name, params, body, dl, returns, comment):
+                newBody = sum([self.rco_stmt(st) for st in body], [])
+                return [FunctionDef(name, params, newBody, dl, returns, comment)]
+            case _:
+                return super().rco_stmt(s)
 
     def remove_complex_operands(self, p: Module) -> Module:
         match p:
@@ -443,76 +467,120 @@ class CompilerFun(CompilerArray):
     def explicate_assign(self, rhs: List[expr], lhs: expr, cont: List[expr], basic_blocks: Dict[str, List[stmt]]) -> Promise | List[stmt]:
         return super().explicate_assign(rhs, lhs, cont, basic_blocks)
 
+    def explicate_tail(self, e: expr, basic_blocks: Dict[str, List[stmt]]) -> Promise | List[stmt]:
+        match e:
+            case Begin(body, result):
+                newResult = self.explicate_tail(result, basic_blocks)
+                for s in reversed(body):
+                    newResult = self.explicate_stmt(s, newResult, basic_blocks)
+                return newResult
+            case IfExp(arg1, arg2, arg3):
+                newArg2 = self.explicate_tail(arg2, basic_blocks)
+                newArg3 = self.explicate_tail(arg3, basic_blocks)
+                return self.explicate_pred(arg1, newArg2, newArg3, basic_blocks)
+            case Call(Name(func), args):
+                if func in builtin_functions:
+                    return [Return(e)]
+                else:
+                    return [TailCall(Name(func), args)]
+            case Call(fun, args):
+                return [TailCall(fun, args)]
+            case _:
+                return [Return(e)]
+
     def explicate_pred(self, cnd: expr, thn: List[stmt], els: List[stmt], basic_blocks: Dict[str, List[stmt]]) -> List[stmt]:
         match cnd:
-            case Subscript(arg1, arg2, Load()):
-                temp = Name(generate_name('tmp'))
-                return [Assign([temp], cnd)] + force(self.explicate_pred(temp, thn, els, basic_blocks))
+            case Call(func, args):
+                newTemp = Name(generate_name('tmp'))
+                thnBlock = self.create_block(thn, basic_blocks)
+                elsBlock = self.create_block(els, basic_blocks)
+                return [Assign([newTemp], cnd),
+                        If(Compare(newTemp, [Eq()], [Constant(True)]), thnBlock, elsBlock)]
             case _:
                 return super().explicate_pred(cnd, thn, els, basic_blocks)
     
     def explicate_stmt(self, s: stmt, cont: List[stmt], basic_blocks: Dict[str, List[stmt]]) -> List[stmt]:
         match s:
-            case Expr(Call(Name('array_store'), args)):
-                raise Exception ('sto[]')
+            case Return(value):
+                return self.explicate_tail(value, basic_blocks)
             case _:
                 return super().explicate_stmt(s, cont, basic_blocks)
+
+    def explicate_def(self, s: stmt) -> stmt:
+        match s:
+            case FunctionDef(name, params, body, dl, returns, comment):
+                newbody = []
+                blocks = {}
+                if isinstance(returns, VoidType):
+                    body += [Return(Constant(None))]
+                for s in reversed(body):
+                    newbody = self.explicate_stmt(s, newbody, blocks)
+                blocks[label_name(name + '_call')] = force(newbody)
+                return FunctionDef(name, params, blocks, dl, returns, comment)
+            case _:
+                raise Exception
     
     def explicate_control(self, p: Module) -> CProgram:
         match p:
             case Module(body):
-                new_body = [Return(Constant(0))]
-                basic_blocks = {}
-                for s in reversed(body):
-                    new_body = self.explicate_stmt(s, new_body, basic_blocks)
-                basic_blocks[label_name('start')] = force(new_body)
-                temp = CProgram(basic_blocks)
-                temp = self.remove_orphans(temp)
-                return temp
+                funcDefs = []
+                for defn in body:
+                    funcDefs.append(self.explicate_def(defn))
+                return CProgramDefs(funcDefs)
             case _:
                 raise Exception ('error in explicate_control + ', repr(p))
 
-    ###############################################################
-    ######## Remove Orphans
-    ###############################################################
+### Remove orphans no longer works because we don't know the initial block for each function besides main
 
-    block_parent_dict = {}
-    block_child_dict = {}
-
-    def count_parents(self, label: str, stmts: List[instr]):
-        for s in stmts:
-            match s:
-                case Goto(l):
-                    self.block_parent_dict[l] += [label]
-                    self.block_child_dict[label] += [l]
-                case If(cmp, [Goto(l1)], [Goto(l2)]):
-                    self.block_parent_dict[l1] += [label]
-                    self.block_child_dict[label] += [l1]
-                    self.block_parent_dict[l2] += [label]
-
-                    self.block_child_dict[label] += [l2]
-                case _:
-                    continue
-
-    def remove_orphans(self, p: CProgram) -> CProgram:
-        match p:
-            case CProgram(blocks):
-                self.block_parent_dict = {}
-                self.block_child_dict = {}
-                for (block, ss) in blocks.items():
-                    self.block_parent_dict[block] = []
-                    self.block_child_dict[block] = []
-                for (block, ss) in blocks.items():
-                    self.count_parents(block, ss)
-                orphans = []
-                for block in blocks:
-                    if (len(self.block_parent_dict[block]) == 0 and block != 'start'):
-                        orphans += [block]
-                for block in orphans:
-                    blocks.pop(block)
-                    for c in self.block_child_dict[block]:
-                        self.block_parent_dict[c].remove(block)
-                return CProgram(blocks)
+#    ###############################################################
+#    ######## Remove Orphans
+#    ###############################################################
+#
+#    block_parent_dict = {}
+#    block_child_dict = {}
+#
+#    def count_parents(self, label: str, stmts: List[instr]):
+#        for s in stmts:
+#            match s:
+#                case Goto(l):
+#                    self.block_parent_dict[l] += [label]
+#                    self.block_child_dict[label] += [l]
+#                case If(cmp, [Goto(l1)], [Goto(l2)]):
+#                    self.block_parent_dict[l1] += [label]
+#                    self.block_child_dict[label] += [l1]
+#                    self.block_parent_dict[l2] += [label]
+#
+#                    self.block_child_dict[label] += [l2]
+#                case _:
+#                    continue
+#
+#    def remove_orphans(self, p: CProgram) -> CProgram:
+#        match p:
+#            case FunctionDef(name, params, body, dl, returns, comment):
+#                blocks = body
+#                self.block_parent_dict = {}
+#                self.block_child_dict = {}
+#                for (block, ss) in blocks.items():
+#                    self.block_parent_dict[block] = []
+#                    self.block_child_dict[block] = []
+#                for (block, ss) in blocks.items():
+#                    self.count_parents(block, ss)
+#                orphans = []
+#                for block in blocks:
+#                    if (len(self.block_parent_dict[block]) == 0 and block != 'start'):
+#                        orphans += [block]
+#                for block in orphans:
+#                    blocks.pop(block)
+#                    for c in self.block_child_dict[block]:
+#                        self.block_parent_dict[c].remove(block)
+#                return FunctionDef(name, params, blocks, dl, returns, comment)
+#            case CProgramDefs(funcDefs):
+#                newDefs = []
+#                for func in funcDefs:
+#                    newDefs.append(self.remove_orphans(func))
+#                return CProgramDefs(newDefs)
+#            case _:
+#                raise Exception ('error in remove orphans + ', repr(p))
 
     ###############################################################
     ######## Remove Jumps

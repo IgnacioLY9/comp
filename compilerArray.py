@@ -368,7 +368,7 @@ class CompilerArray(CompilerTup):
     def explicate_stmt(self, s: stmt, cont: List[stmt], basic_blocks: Dict[str, List[stmt]]) -> List[stmt]:
         match s:
             case Expr(Call(Name('array_store'), args)):
-                raise Exception ('sto[]')
+                raise Exception ('stop')
             case _:
                 return super().explicate_stmt(s, cont, basic_blocks)
     

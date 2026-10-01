@@ -50,7 +50,7 @@ interp_dict = {
     # 'prelude_and_conclusion': interp_x86,
 }
 
-run_one_test(os.getcwd() + '/tests/fun/t2.py',
+run_one_test(os.getcwd() + '/tests/fun/t1.py',
                  'fun',
                  compiler,
                  'fun',

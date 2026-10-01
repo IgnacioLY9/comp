@@ -124,7 +124,7 @@ class CompilerTup(CompilerWhile):
             case Subscript(arg, idx, Load()):
                 return Subscript(self.expose_exp(arg), self.expose_exp(idx), Load())
             case _:
-                raise Exception ('error in expose_arg + ', repr(e))
+                raise Exception ('error in expose_exp + ', repr(e))
 
     def expose_stmt(self, s: stmt) -> stmt:
         match s:

@@ -198,9 +198,6 @@ class CompilerIf(CompilerVar):
                 newBody = self.explicate_effect(body, cont, basic_blocks)
                 newElse = self.explicate_effect(orelse, cont, basic_blocks)
                 newExpr = self.explicate_pred(test, newBody, newElse, basic_blocks)
-                print('xxxxxxxxxxxxxxxxxEffectxxxxxxxxxxxxxxx')
-                print(e, newExpr)
-                print('-----------')
                 return newExpr
             case Call(func, args):
                 block = self.create_block([Expr(e)] + force(cont), basic_blocks)
@@ -225,9 +222,6 @@ class CompilerIf(CompilerVar):
                 newBody = self.explicate_assign(body, lhs, next_block, basic_blocks)
                 newElse = self.explicate_assign(orelse, lhs, next_block, basic_blocks)
                 newRhs = self.explicate_pred(test, newBody, newElse, basic_blocks)
-                print('xxxxxxxxxxxxxxxxxAssignxxxxxxxxxxxxxxx')
-                print(rhs, newRhs)
-                print('---------------')
                 return newRhs
             case Begin(body, result):
                 ss = self.explicate_assign(result, lhs, cont, basic_blocks)

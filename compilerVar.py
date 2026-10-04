@@ -207,6 +207,8 @@ class CompilerVar:
                 return Variable(id)
             case Constant(value):
                 return Immediate(value)
+            case Reg(id):
+              return e
             case _:
                 raise Exception ('error in select_arg + ', repr(e))
 
@@ -240,6 +242,8 @@ class CompilerVar:
                         Instr('movq', [Reg('rax'), self.select_arg(Name(id))])]
             case Assign([Name(id)], arg):
                 return [Instr('movq', [self.select_arg(arg), self.select_arg(Name(id))])]
+            case Assign([Reg(loc)], arg):
+                return [Instr('movq', [self.select_arg(arg), self.select_arg(Reg(loc))])]
             case _:
                 raise Exception ('error in select_stmt + ', repr(s))
 

@@ -429,7 +429,7 @@ class CompilerFun(CompilerArray):
     def rco_stmt(self, s: stmt) -> List[stmt]:
         match s:
             case Return(value):
-                newVar, newMap = self.rco_exp(value, False)
+                newVar, newMap = self.rco_exp(value, True)
                 return newMap + [Return(newVar)]
             case FunctionDef(name, params, body, dl, returns, comment):
                 newBody = sum([self.rco_stmt(st) for st in body], [])
@@ -515,7 +515,7 @@ class CompilerFun(CompilerArray):
                     body += [Return(Constant(None))]
                 for s in reversed(body):
                     newbody = self.explicate_stmt(s, newbody, blocks)
-                blocks[label_name(name + '_call')] = force(newbody)
+                blocks[label_name(name + '_start')] = force(newbody)
                 return FunctionDef(name, params, blocks, dl, returns, comment)
             case _:
                 raise Exception
@@ -526,61 +526,61 @@ class CompilerFun(CompilerArray):
                 funcDefs = []
                 for defn in body:
                     funcDefs.append(self.explicate_def(defn))
-                return CProgramDefs(funcDefs)
+                temp = CProgramDefs(funcDefs)
+                temp = self.remove_orphans(temp)
+                return temp
             case _:
                 raise Exception ('error in explicate_control + ', repr(p))
 
-### Remove orphans no longer works because we don't know the initial block for each function besides main
+    ###############################################################
+    ######## Remove Orphans
+    ###############################################################
 
-#    ###############################################################
-#    ######## Remove Orphans
-#    ###############################################################
-#
-#    block_parent_dict = {}
-#    block_child_dict = {}
-#
-#    def count_parents(self, label: str, stmts: List[instr]):
-#        for s in stmts:
-#            match s:
-#                case Goto(l):
-#                    self.block_parent_dict[l] += [label]
-#                    self.block_child_dict[label] += [l]
-#                case If(cmp, [Goto(l1)], [Goto(l2)]):
-#                    self.block_parent_dict[l1] += [label]
-#                    self.block_child_dict[label] += [l1]
-#                    self.block_parent_dict[l2] += [label]
-#
-#                    self.block_child_dict[label] += [l2]
-#                case _:
-#                    continue
-#
-#    def remove_orphans(self, p: CProgram) -> CProgram:
-#        match p:
-#            case FunctionDef(name, params, body, dl, returns, comment):
-#                blocks = body
-#                self.block_parent_dict = {}
-#                self.block_child_dict = {}
-#                for (block, ss) in blocks.items():
-#                    self.block_parent_dict[block] = []
-#                    self.block_child_dict[block] = []
-#                for (block, ss) in blocks.items():
-#                    self.count_parents(block, ss)
-#                orphans = []
-#                for block in blocks:
-#                    if (len(self.block_parent_dict[block]) == 0 and block != 'start'):
-#                        orphans += [block]
-#                for block in orphans:
-#                    blocks.pop(block)
-#                    for c in self.block_child_dict[block]:
-#                        self.block_parent_dict[c].remove(block)
-#                return FunctionDef(name, params, blocks, dl, returns, comment)
-#            case CProgramDefs(funcDefs):
-#                newDefs = []
-#                for func in funcDefs:
-#                    newDefs.append(self.remove_orphans(func))
-#                return CProgramDefs(newDefs)
-#            case _:
-#                raise Exception ('error in remove orphans + ', repr(p))
+    block_parent_dict = {}
+    block_child_dict = {}
+
+    def count_parents(self, label: str, stmts: List[instr]):
+        for s in stmts:
+            match s:
+                case Goto(l):
+                    self.block_parent_dict[l] += [label]
+                    self.block_child_dict[label] += [l]
+                case If(cmp, [Goto(l1)], [Goto(l2)]):
+                    self.block_parent_dict[l1] += [label]
+                    self.block_child_dict[label] += [l1]
+                    self.block_parent_dict[l2] += [label]
+
+                    self.block_child_dict[label] += [l2]
+                case _:
+                    continue
+
+    def remove_orphans(self, p: CProgram) -> CProgram:
+        match p:
+            case FunctionDef(name, params, body, dl, returns, comment):
+                blocks = body
+                self.block_parent_dict = {}
+                self.block_child_dict = {}
+                for (block, ss) in blocks.items():
+                    self.block_parent_dict[block] = []
+                    self.block_child_dict[block] = []
+                for (block, ss) in blocks.items():
+                    self.count_parents(block, ss)
+                orphans = []
+                for block in blocks:
+                    if (len(self.block_parent_dict[block]) == 0 and block != name + '_start'):
+                        orphans += [block]
+                for block in orphans:
+                    blocks.pop(block)
+                    for c in self.block_child_dict[block]:
+                        self.block_parent_dict[c].remove(block)
+                return FunctionDef(name, params, blocks, dl, returns, comment)
+            case CProgramDefs(funcDefs):
+                newDefs = []
+                for func in funcDefs:
+                    newDefs.append(self.remove_orphans(func))
+                return CProgramDefs(newDefs)
+            case _:
+                raise Exception ('error in remove orphans + ', repr(p))
 
     ###############################################################
     ######## Remove Jumps
@@ -593,6 +593,7 @@ class CompilerFun(CompilerArray):
         return super().merge_blocks()
 
     def remove_jumps(self, p: X86Program) -> X86Program:
+        return p
         match p:
             case X86Program(blocks):
                 self.block_parent_dict = {}
@@ -630,86 +631,114 @@ class CompilerFun(CompilerArray):
     ###############################################################
 
     def select_arg(self, e: expr) -> arg:
-            return super().select_arg(e)
+        return super().select_arg(e)
 
     def select_op(self, op: operator) -> str:
-        match op:
-            case Mult():
-                return 'imulq'
-            case _:
-                return super().select_op(op)
+        return super().select_op(op)
 
     def select_jump(self, op: operator) -> str:
-            return super().select_jump(op)
+        return super().select_jump(op)
 
     def isPointer(self, arg: TupleType) -> bool:
-        match arg:
-            case ListType(t):
-                return True
-            case _:
-                return super().isPointer(arg)
+            return super().isPointer(arg)
 
     def select_stmt(self, s: stmt) -> List[instr]:
         match s:
-            case Assign([arg1], Call(Name('array_load'), [tup, idx])):
-                arg1 = self.select_arg(arg1)
-                arg2 = self.select_arg(tup)
-                arg3 = self.select_arg(idx)
-                return [Instr('movq', [arg2, Reg('r11')]), # put arr in r11
-                        Instr('movq', [arg3, Reg('rax')]), # put arg3 in rax
-                        Instr('addq', [Immediate(1), Reg('rax')]), # get the offset
-                        Instr('imulq', [Immediate(8), Reg('rax')]),
-                        Instr('addq', [Reg('rax'), Reg('r11')]), # get the memory location we want
-                        Instr('movq', [Deref('r11', 0), arg1])] # put the value in the arg
-            case Expr(Call(Name('array_store'), [tup, idx, val])):
-                arg1 = self.select_arg(tup)
-                arg2 = self.select_arg(idx)
-                arg3 = self.select_arg(val)
-                return [Instr('movq', [arg1, Reg('r11')]),
-                        Instr('movq', [arg2, Reg('rax')]),
-                        Instr('addq', [Immediate(1), Reg('rax')]),
-                        Instr('imulq', [Immediate(8), Reg('rax')]),
-                        Instr('addq', [Reg('rax'), Reg('r11')]),
-                        Instr('movq', [arg3, Deref('r11', 0)])]
-            case Assign([arg1], Call(Name('array_len'), [arg2])):
-                arg1 = self.select_arg(arg1)
-                arg2 = self.select_arg(arg2)
-                return [Instr('movq', [arg2, Reg('rax')]), # put tuple in rax
-                        Instr('movq', [Deref('rax', 0), Reg('rax')]), # dereference to load the actual bits in rax
-                        Instr('movq', [Immediate((2 ** 62) - 4), Reg('r11')]),
-                        Instr('andq', [Reg('r11'), Reg('rax')]), # and with 2^64 - 2 to get just the bits that store size
-                        Instr('sarq', [Immediate(2), Reg('rax')]), # shift right to get rid of the trailing 0s 
-                        Instr('movq', [Reg('rax'), arg1])] # store length in arg2
-            case Assign([arg1], AllocateArray(arg2, ListType(types))):
-                arg1 = self.select_arg(arg1)
-                len = arg2
-                if self.isPointer(types):
-                    pointer_mask = 1
+            case TailCall(Name(id), args):
+                newFunc = self.select_arg(Name(id))
+                newArgs = [self.select_arg(a) for a in args]
+                moves = []
+                for i in range(len(newArgs)):
+                    moves.append(Instr('movq', [newArgs[i], self.param_registers[i]]))
+                return moves + [TailJump(newFunc, len(args))]
+            case TailCall(FunRef(name, arity), args):
+                newFun = self.select_arg(Name(name))
+                newArgs = [self.select_arg(a) for a in args]
+                moves = []
+                for i in range(len(newArgs)):
+                    moves.append(Instr('movq', [newArgs[i], self.param_registers[i]]))
+                return moves + [TailJump(newFunc, len(args))]
+            case Return(value):
+                st = Assign([Reg('rax')], value)
+                st = self.select_stmt(st)
+                return st + [Jump(label_name(self.current_fun + '_conclusion'))]
+            case Assign([lhs], Constant(None)):
+                newLhs = self.select_arg(lhs)
+                return [Instr('movq', [Immediate(0), newLhs])]
+            case Assign([lhs], Call(Name(f), args)):
+                if f in builtin_functions:
+                    return super().select_stmt(s)
                 else:
-                    pointer_mask = 0
-                tag = 0 | (len << 2) | (pointer_mask << 1)| 1
-                return [Instr('movq', [Global(label_name('free_ptr')), Reg('r11')]),
-                        Instr('addq', [Immediate(8 * (len + 1)), Global(label_name('free_ptr'))]),
-                        Instr('movq', [Immediate(tag), Deref('r11', 0)]),
-                        Instr('movq', [Reg('r11'), arg1])]
-            case Assign([arg1], Call(Name('exit'), [])):
-                return [Instr('movq', [Immediate(255), Reg('rdi')]),
-                        Callq(label_name('call_exit'), 1)]
+                    newArgs = [self.select_arg(a) for a in args]
+                    moves = []
+                    for i in range(len(newArgs)):
+                        moves.append(Instr('movq', [newArgs[i], self.param_registers[i]]))
+                    newFun = self.select_arg(Name(f))
+                    newLhs = self.select_arg(lhs)
+                    return moves + [IndirectCallq(newFun, len(newArgs)),
+                                    Instr('movq', [Reg('rax'), newLhs])]
+            case Assign([lhs], FunRef(name, arity)):
+                lhs_prime = self.select_arg(lhs)
+                return [Instr('leaq', [Global(label_name(name)), lhs_prime])]
+            case Assign([lhs], Call(FunRef(name, arity), args)):
+                newArgs = [self.select_arg(a) for a in args]
+                moves = []
+                for i in range(len(newArgs)):
+                    moves.append(Instr('movq', [newArgs[i], self.param_registers[i]]))
+                newFun = self.select_arg(Name(name))
+                newLhs = self.select_arg(lhs)
+                return moves + [IndirectCallq(newFun, len(newArgs)),
+                                Instr('movq', [Reg('rax'), newLhs])]
+            case Expr(Call(Name(f), args)):
+                if f in builtin_functions:
+                    return super().select_stmt(s)
+                else:
+                    newArgs = [self.select_arg(a) for a in args]
+                    moves = []
+                    for i in range(len(newArgs)):
+                        moves.append(Instr('movq', [newArgs[i], self.param_registers[i]]))
+                    newFun = self.select_arg(Name(f))
+                    return moves + [IndirectCallq(newFun, len(newArgs))]
+            case Expr(Call(FunRef(name, arity), args)):
+                newArgs = [self.select_arg(a) for a in args]
+                moves = []
+                for i in range(len(newArgs)):
+                    moves.append(Instr('movq', [newArgs[i], self.param_registers[i]]))
+                newFun = self.select_arg(Name(name))
+                return moves + [IndirectCallq(newFun, len(newArgs))]
             case _:
                 return super().select_stmt(s)
 
-    def select_instructions(self, p: Module) -> X86Program:
-        match p:
-            case CProgram(blocks):
+    def select_def(self, s: stmt) -> stmt:
+        match s:
+            case FunctionDef(name, params, blocks, dl, returns, comment):
+                self.current_fun = name
+                moveRegisters = []
+                for i in range(len(params)):
+                    moveRegisters.append(Instr('movq', [self.param_registers[i], Variable(params[i][0])]))
                 block_dict = {}
                 for (label, ss) in blocks.items():
-                    block_dict[label] = []
-                    for s in ss:
-                        instructions = self.select_stmt(s)
+                    if label == name + '_start':
+                        block_dict[label] = moveRegisters
+                    else:
+                        block_dict[label] = []
+                    for st in ss:
+                        instructions = self.select_stmt(st)
                         block_dict[label] += instructions
-                temp = X86Program(block_dict)
+                func = FunctionDef(label_name(name), [], block_dict, dl, returns, comment)
+                func.var_types = s.var_types
+                return func
+            case _:
+                raise Exception ('error in select_def + ', repr(s))
+
+    def select_instructions(self, p: Module) -> X86Program:
+        match p:
+            case CProgramDefs(funDefs):
+                newDefs = []
+                for fun in funDefs:
+                    newDefs.append(self.select_def(fun))
+                temp = X86ProgramDefs(newDefs)
                 temp = self.remove_jumps(temp)
-                temp.var_types = p.var_types
                 return temp
             case _:
                 raise Exception ('error in select_intructions + ', repr(p))

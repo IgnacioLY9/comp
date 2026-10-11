@@ -193,30 +193,10 @@ class CompilerWhile(CompilerIf):
     ###############################################################
 
     def count_parents_86(self, label: str, stmts: List[instr]):
-        for s in stmts:
-            match s:
-                case Jump(l):
-                    self.block_parent_dict[l] += [label]
-                    self.block_child_dict[label] += [l]
-                case JumpIf(cc, l):
-                    self.block_parent_dict[l] += [label]
-                    self.block_child_dict[label] += [l]
-                case _:
-                    continue
+        return super().count_parents_86(label, stmts)
 
     def merge_blocks(self, child_label: str, parent: List[instr], child: List[instr]) -> List[instr]:
-        returnList = []
-        for i in parent:
-            match i:
-                case JumpIf(cc, loc):
-                    if loc == child_label:
-                        returnList += child
-                case Jump(loc):
-                    if loc == child_label:
-                        returnList += child
-                case _:
-                    returnList.append(i)
-        return returnList
+        return super().merge_blocks(child_label, parent, child)
 
     def remove_jumps(self, p: X86Program) -> X86Program:
         match p:
@@ -233,7 +213,9 @@ class CompilerWhile(CompilerIf):
                 for (label, ss) in blocks.items():
                     for s in ss:
                         match s:
-                            case Goto(arg):
+                            case Jump(arg):
+                                graph.add_edge(label, arg)
+                            case JumpIf(cc, arg):
                                 graph.add_edge(label, arg)
                             case _:
                                 continue
@@ -247,8 +229,9 @@ class CompilerWhile(CompilerIf):
                         blocks.pop(label)
                     elif len(self.block_parent_dict[label]) == 1:
                         parent = self.block_parent_dict[label][0]
-                        blocks[parent] = self.merge_blocks(label, blocks[parent], ss)
-                    blocks.pop(label)
+                        blocks[parent], merge = self.merge_blocks(label, blocks[parent], ss)
+                        if merge:
+                            blocks.pop(label)
                 return X86Program(blocks)
 
     ###############################################################
@@ -302,13 +285,13 @@ class CompilerWhile(CompilerIf):
         return super().W(i)
 
     def getBeforeAfter(self, i: instr, prev_before):
-        curr_after = prev_before
-        curr_before = (curr_after - self.W(i)) | self.R(i) # - is set difference, | is union
-        return [curr_before, curr_after]
+        return super().getBeforeAfter(i, prev_before)
 
     def uncover_live(self, p: X86Program) -> Dict[instr, Set[location]]:
         match p:
             case X86Program(blocks):
+                if len(blocks) == 1:
+                    return super().uncover_live(p)
                 live_before_dict_block = {}
                 live_after_dict_block = {}
                 live_before_dict_i = {}

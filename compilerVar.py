@@ -260,7 +260,6 @@ class CompilerVar:
     ############################################################################
 
     def assign_homes_arg(self, a: arg, home: Dict[Variable, arg]) -> arg:
-        print(repr(a))
         match a:
             case Immediate(value):
                 return a

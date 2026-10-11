@@ -1,7 +1,7 @@
 	.align 16
 block.50:
-    movq %r13, %rax
-    imulq %r12, %rax
+    movq %r12, %rax
+    imulq %r14, %rax
     movq %rax, %rcx
     movq -24(%rbp), %rax
     addq %rcx, %rax
@@ -13,12 +13,12 @@ block.50:
 
 	.align 16
 block.51:
-    movq %r14, %r11
+    movq %rbx, %r11
     movq -16(%rbp), %rax
     addq $1, %rax
     imulq $8, %rax
     addq %rax, %r11
-    movq 0(%r11), %r12
+    movq 0(%r11), %r14
     jmp block.50
 
 	.align 16
@@ -29,7 +29,7 @@ block.52:
 
 	.align 16
 block.53:
-    movq %r14, %rax
+    movq %rbx, %rax
     movq 0(%rax), %rax
     movq $4611686018427387900, %r11
     andq %r11, %rax
@@ -52,7 +52,7 @@ block.55:
     addq $1, %rax
     imulq $8, %rax
     addq %rax, %r11
-    movq 0(%r11), %r13
+    movq 0(%r11), %r12
     jmp block.54
 
 	.align 16
@@ -80,17 +80,13 @@ block.58:
     jmp block.56
 
 	.align 16
-block.59:
+label.49:
+    cmpq %r13, -16(%rbp)
+    jne block.58
     movq -24(%rbp), %rdi
     callq print_int
     movq $0, %rax
     jmp conclusion
-
-	.align 16
-label.49:
-    cmpq %rbx, -16(%rbp)
-    jne block.58
-    jmp block.59
 
 	.align 16
 block.60:
@@ -99,10 +95,10 @@ block.60:
     movq $9, 0(%r11)
     movq %r11, %rcx
     movq %rcx, %r11
-    movq %r14, 8(%r11)
+    movq %r13, 8(%r11)
     movq %rcx, %r11
     movq %rbx, 16(%r11)
-    movq %rcx, %r14
+    movq %rcx, %rbx
     movq $0, -16(%rbp)
     movq $0, -24(%rbp)
     movq -8(%r15), %rax
@@ -110,7 +106,7 @@ block.60:
     movq $4611686018427387900, %r11
     andq %r11, %rax
     sarq $2, %rax
-    movq %rax, %rbx
+    movq %rax, %r13
     jmp label.49
 
 	.align 16
@@ -127,11 +123,11 @@ block.62:
     movq $9, 0(%r11)
     movq %r11, %rcx
     movq %rcx, %r11
-    movq %r14, 8(%r11)
+    movq %rbx, 8(%r11)
     movq %rcx, %r11
-    movq %rbx, 16(%r11)
+    movq %r13, 16(%r11)
     movq %rcx, -8(%r15)
-    movq $3, %r14
+    movq $3, %r13
     movq $3, %rbx
     movq free_ptr(%rip), %rax
     addq $24, %rax
@@ -149,8 +145,8 @@ block.63:
 
 	.align 16
 start:
-    movq $2, %r14
     movq $2, %rbx
+    movq $2, %r13
     movq free_ptr(%rip), %rax
     addq $24, %rax
     movq %rax, %rcx
@@ -161,11 +157,11 @@ start:
 	.globl main
 	.align 16
 main:
-    pushq %r13
-    pushq %rbx
     pushq %r14
     pushq %r12
     pushq %r15
+    pushq %rbx
+    pushq %r13
     pushq %rbp
     movq %rsp, %rbp
     subq $24, %rsp
@@ -182,11 +178,11 @@ conclusion:
     subq $1, %r15
     addq $24, %rsp
     popq %rbp
+    popq %r13
+    popq %rbx
     popq %r15
     popq %r12
     popq %r14
-    popq %rbx
-    popq %r13
     retq 
 
 

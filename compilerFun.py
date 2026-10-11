@@ -590,15 +590,15 @@ class CompilerFun(CompilerArray):
         return super().count_parents_86(label, stmts)
 
     def merge_blocks(self, child_label: str, parent: List[instr], child: List[instr]) -> List[instr]:
-        return super().merge_blocks()
+        return super().merge_blocks(child_label, parent, child)
 
     def remove_jumps(self, p: X86Program) -> X86Program:
-        return p
         match p:
-            case X86Program(blocks):
+            case FunctionDef(name, params, body, dl, returns, comment):
+                blocks = body
                 self.block_parent_dict = {}
                 self.block_child_dict = {}
-                self.block_parent_dict['conclusion'] = []
+                self.block_parent_dict[name + '_conclusion'] = []
                 for (block, ss) in blocks.items():
                     self.block_parent_dict[block] = []
                     self.block_child_dict[block] = []
@@ -608,14 +608,16 @@ class CompilerFun(CompilerArray):
                 for (label, ss) in blocks.items():
                     for s in ss:
                         match s:
-                            case Goto(arg):
+                            case Jump(arg):
+                                graph.add_edge(label, arg)
+                            case JumpIf(cc, arg):
                                 graph.add_edge(label, arg)
                             case _:
                                 continue
                 graph = transpose(graph)
                 block_list = topological_sort(graph)
                 for label in block_list:
-                    if label == 'start' or label == 'conclusion':
+                    if label == name + '_start' or label == name + '_conclusion':
                         continue
                     ss = blocks[label]
                     if len(self.block_parent_dict[label]) == 0:
@@ -623,8 +625,15 @@ class CompilerFun(CompilerArray):
                     elif len(self.block_parent_dict[label]) == 1:
                         parent = self.block_parent_dict[label][0]
                         blocks[parent] = self.merge_blocks(label, blocks[parent], ss)
-                    blocks.pop(label)
-                return X86Program(blocks)
+                        blocks.pop(label)
+                return FunctionDef(name, params, blocks, dl, returns, comment)
+            case X86ProgramDefs(funDefs):
+                newDefs = []
+                for func in funDefs:
+                    newDefs.append(self.remove_jumps(func))
+                return X86ProgramDefs(newDefs)
+            case _:
+                raise Exception('error in remove_jumps + ', repr(p))
 
     ###############################################################
     ######## Select Instructions

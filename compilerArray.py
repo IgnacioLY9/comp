@@ -394,39 +394,10 @@ class CompilerArray(CompilerTup):
     block_child_dict = {}
 
     def count_parents(self, label: str, stmts: List[instr]):
-        for s in stmts:
-            match s:
-                case Goto(l):
-                    self.block_parent_dict[l] += [label]
-                    self.block_child_dict[label] += [l]
-                case If(cmp, [Goto(l1)], [Goto(l2)]):
-                    self.block_parent_dict[l1] += [label]
-                    self.block_child_dict[label] += [l1]
-                    self.block_parent_dict[l2] += [label]
-
-                    self.block_child_dict[label] += [l2]
-                case _:
-                    continue
+        super().count_parents(label, stmts)
 
     def remove_orphans(self, p: CProgram) -> CProgram:
-        match p:
-            case CProgram(blocks):
-                self.block_parent_dict = {}
-                self.block_child_dict = {}
-                for (block, ss) in blocks.items():
-                    self.block_parent_dict[block] = []
-                    self.block_child_dict[block] = []
-                for (block, ss) in blocks.items():
-                    self.count_parents(block, ss)
-                orphans = []
-                for block in blocks:
-                    if (len(self.block_parent_dict[block]) == 0 and block != 'start'):
-                        orphans += [block]
-                for block in orphans:
-                    blocks.pop(block)
-                    for c in self.block_child_dict[block]:
-                        self.block_parent_dict[c].remove(block)
-                return CProgram(blocks)
+        return super().remove_orphans(p)
 
     ###############################################################
     ######## Remove Jumps
@@ -436,40 +407,10 @@ class CompilerArray(CompilerTup):
         return super().count_parents_86(label, stmts)
 
     def merge_blocks(self, child_label: str, parent: List[instr], child: List[instr]) -> List[instr]:
-        return super().merge_blocks()
+        return super().merge_blocks(child_label, parent, child)
 
     def remove_jumps(self, p: X86Program) -> X86Program:
-        match p:
-            case X86Program(blocks):
-                self.block_parent_dict = {}
-                self.block_child_dict = {}
-                self.block_parent_dict['conclusion'] = []
-                for (block, ss) in blocks.items():
-                    self.block_parent_dict[block] = []
-                    self.block_child_dict[block] = []
-                for (block, ss) in blocks.items():
-                    self.count_parents_86(block, ss)
-                graph = DirectedAdjList()
-                for (label, ss) in blocks.items():
-                    for s in ss:
-                        match s:
-                            case Goto(arg):
-                                graph.add_edge(label, arg)
-                            case _:
-                                continue
-                graph = transpose(graph)
-                block_list = topological_sort(graph)
-                for label in block_list:
-                    if label == 'start' or label == 'conclusion':
-                        continue
-                    ss = blocks[label]
-                    if len(self.block_parent_dict[label]) == 0:
-                        blocks.pop(label)
-                    elif len(self.block_parent_dict[label]) == 1:
-                        parent = self.block_parent_dict[label][0]
-                        blocks[parent] = self.merge_blocks(label, blocks[parent], ss)
-                    blocks.pop(label)
-                return X86Program(blocks)
+        return super().remove_jumps(p)
 
     ###############################################################
     ######## Select Instructions
@@ -592,77 +533,17 @@ class CompilerArray(CompilerTup):
                 return super().W(i)
 
     def getBeforeAfter(self, i: instr, prev_before):
-        curr_after = prev_before
-        curr_before = (curr_after - self.W(i)) | self.R(i) # - is set difference, | is union
-        return [curr_before, curr_after]
+        return super().getBeforeAfter(i, prev_before)
 
     def uncover_live(self, p: X86Program) -> Dict[instr, Set[location]]:
-        match p:
-            case X86Program(blocks):
-                live_before_dict_block = {}
-                live_after_dict_block = {}
-                live_before_dict_i = {}
-                live_after_dict_i = {}
-                live_after_dict_block['conclusion'] = set()
-                live_before_dict_block['conclusion'] = set()
-                graph = DirectedAdjList()
-                for (label, ss) in blocks.items():
-                    live_before_dict_block[label] = set()
-                    live_after_dict_block[label] = set()
-                    for s in ss:
-                        match s:
-                            case JumpIf(cc, arg):
-                                if arg == 'conclusion':
-                                    continue
-                                graph.add_edge(label, arg)
-                            case Jump(arg):
-                                if arg == 'conclusion':
-                                    continue
-                                graph.add_edge(label, arg)
-                            case _:
-                                continue
-                graph = transpose(graph)
-
-                def transfer(label, live_after_set):
-                    i_before = set()
-                    for i in range(len(blocks[label]) - 1, -1, -1):
-                        match blocks[label][i]:
-                            case Jump(arg):
-                                i_after = live_before_dict_block[arg]
-                                i_before = i_after
-                            case JumpIf(cc, arg):
-                                i_before = i_before | live_before_dict_block[arg]
-                                i_after = i_before
-                            case _:
-                                i_before, i_after = self.getBeforeAfter (blocks[label][i], i_before)
-                        if (i == 0):
-                            live_before_dict_block[label] = i_before
-                        live_before_dict_i.update({blocks[label][i] : i_before})
-                        live_after_dict_i.update({blocks[label][i] : i_after})
-
-                    return live_before_dict_block[label]
-
-                analyze_dataflow(graph, transfer, set(), lambda x, y: x.union(y))
-
-                return live_after_dict_i
-            case _:
-                raise Exception ('error in uncover_live + ', repr(p))
+        return super().uncover_live(p)
 
     ############################################################################
     # Build Interference graph
     ############################################################################
 
     def add_edges(self, i: instr, graph: UndirectedAdjList, afterSet: Set[location]):
-        match i:
-            case Callq(name, args):
-                if name == label_name('collect'):
-                    for v in afterSet:
-                        if v not in self.registers and self.isPointer(self.var_types[v.id]):
-                            for r in self.callee_saved_registers:
-                                graph.add_edge(v, r)
-                return super().add_edges(i, graph, afterSet)
-            case _:
-                return super().add_edges(i, graph, afterSet)
+        return super().add_edges(i, graph, afterSet)
 
     def add_ver(self, i: instr, graph: UndirectedAdjList):
         return super().add_ver(i, graph)
@@ -732,11 +613,7 @@ class CompilerArray(CompilerTup):
     ###############################################################
 
     def assign_homes_arg(self, a: arg, home: Dict[Variable, arg]) -> arg:
-        match a:
-            case Global(label):
-                return a
-            case _:
-                return super().assign_homes_arg(a, home)
+        return super().assign_homes_arg(a, home)
 
     def assign_homes_instr(self, i: instr, home: Dict[Variable, arg]) -> instr:
         return super().assign_homes_instr(i, home)

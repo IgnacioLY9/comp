@@ -364,19 +364,20 @@ class CompilerIf(CompilerVar):
                 case _:
                     continue
 
-    def merge_blocks(self, child_label: str, parent: List[instr], child: List[instr]) -> List[instr]:
+    def merge_blocks(self, child_label: str, parent: List[instr], child: List[instr]) -> Tuple[List[instr], bool]:
         returnList = []
+        merge = False
         for i in parent:
             match i:
-                case JumpIf(cc, loc):
-                    if loc == child_label:
-                        returnList += child
                 case Jump(loc):
                     if loc == child_label:
                         returnList += child
+                        merge = True
+                    else:
+                        returnList.append(i)
                 case _:
                     returnList.append(i)
-        return returnList
+        return returnList, merge
 
     def remove_jumps(self, p: X86Program) -> X86Program:
         match p:
@@ -392,7 +393,9 @@ class CompilerIf(CompilerVar):
                 for (label, ss) in blocks.items():
                     for s in ss:
                         match s:
-                            case Goto(arg):
+                            case Jump(arg):
+                                graph.add_edge(label, arg)
+                            case JumpIf(cc, arg):
                                 graph.add_edge(label, arg)
                             case _:
                                 continue
@@ -406,8 +409,9 @@ class CompilerIf(CompilerVar):
                         blocks.pop(label)
                     elif len(self.block_parent_dict[label]) == 1:
                         parent = self.block_parent_dict[label][0]
-                        blocks[parent] = self.merge_blocks(label, blocks[parent], ss)
-                    blocks.pop(label)
+                        blocks[parent], merge = self.merge_blocks(label, blocks[parent], ss)
+                        if merge:
+                            blocks.pop(label)
                 return X86Program(blocks)
 
     ###############################################################
@@ -555,9 +559,7 @@ class CompilerIf(CompilerVar):
                 return super().W(i)
 
     def getBeforeAfter(self, i: instr, prev_before):
-        curr_after = prev_before
-        curr_before = (curr_after - self.W(i)) | self.R(i) # - is set difference, | is union
-        return [curr_before, curr_after]
+        return super().getBeforeAfter(i, prev_before)
 
     def uncover_live(self, p: X86Program) -> Dict[instr, Set[location]]:
         match p:
@@ -629,13 +631,7 @@ class CompilerIf(CompilerVar):
                 raise Exception ('error in add_edges + ', repr(i))
 
     def add_ver(self, i: instr, graph: UndirectedAdjList):
-        match i:
-            case Instr(op, args):
-                for arg in args:
-                    if isinstance(arg, Variable) and arg not in graph.vertices():
-                        graph.add_vertex(arg)
-            case _:
-                return
+        return super().add_ver(i, graph)
 
     def build_interference(self, p: X86Program, afterDict: Dict[instr, Set[location]]) -> UndirectedAdjList:
         match p:
@@ -660,78 +656,11 @@ class CompilerIf(CompilerVar):
                 'r9':5,'r10':6,'rbx':7,'r12':8,'r13':9,'r14':10}
 
     def has_colored_neighbor(self, node, sat, move_graph, colors):
-        for u in move_graph.adjacent(node):
-            if u in colors and colors[u] not in sat[u]:
-                return True
-        return False
+        return super().has_colored_neighbor(node, sat, move_graph, colors)
 
     def color_graph(self, graph: UndirectedAdjList, move_graph: UndirectedAdjList) -> Dict[Variable, int]:
-        L = {}
-        sat = {}
-        returnDict = {}
-        for v in graph.vertices():
-            L.update({v : 0})
-            sat.update({v : []})
-        for v in graph.vertices():
-            if v in self.registers:
-                returnDict.update({v : self.regToCol[v.id]})
-                for u in graph.adjacent(v):
-                    if self.regToCol[v.id] < 0:
-                        continue
-                    sat[u].append(self.regToCol[v.id])
-                    L[u] += 1
-        def comp(x, y):
-            return L[x.key] < L[y.key]
-        pq = PriorityQueue(comp)
-        for k,v in L.items():
-            pq.push(k)
-        while(not pq.empty()):
-            potential = []
-            limit = L[pq.top()]
-            while (not pq.empty() and L[pq.top()] == limit):
-                potential.append(pq.pop())
-            node = None
-            for i in range(len(potential)):
-                if i == len(potential) - 1:
-                    node = potential[i]
-                elif potential[i] not in self.registers and self.has_colored_neighbor(potential[i], sat, move_graph, returnDict):
-                    node = potential[i]
-                    break
-                continue
-            for n in potential:
-                if n != node:
-                    pq.push(n)
-            if node in self.registers:
-                continue
-            # assign next available color (update the return dictionary)
-            # check move neighbors to see if they are already colored
-            # if the min number is less than 11, choose that color
-            # if it is greater than 11,
-            # then increment until we find the next available color
-            # if that color is greater than 11, then choose the color of the move neighbor
-            # else choose that color
-            potential_col = float('inf')
-            for u in move_graph.adjacent(node):
-                if u in returnDict:
-                    potential_col = min(potential_col, returnDict[u])
-            i = 0
-            if potential_col < 11 and potential_col not in sat[node]:
-                returnDict.update({node : potential_col})
-            else:
-                while i in sat[node]:
-                    i += 1
-                if i >= 11 and potential_col < float('inf'):
-                    returnDict.update({node : potential_col})
-                else:
-                    returnDict.update({node : i})
-            # add saturation
-            for u in graph.adjacent(node):
-                sat[u].append(returnDict[node])
-                L[u] += 1
-                pq.increase_key(u)
-        # return dictionary
-        return returnDict
-    
+        return super().color_graph(graph, move_graph)
+
     def allocate_registers(self, colors: Dict[Variable, int]):
         returnDict = {}
         for k,v in colors.items():
@@ -747,12 +676,7 @@ class CompilerIf(CompilerVar):
     ############################################################################
 
     def detect_move(self, i: instr, graph: UndirectedAdjList):
-        match i:
-            case Instr('movq', [arg1, arg2]):
-                if arg1 != arg2 and isinstance(arg1, Variable) and isinstance(arg2, Variable):
-                    graph.add_edge(arg1, arg2)
-            case _:
-                return
+        return super().detect_move(i, graph)
 
     def build_move_graph(self, p:X86Program) -> UndirectedAdjList:
         match p:

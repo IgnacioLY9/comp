@@ -739,7 +739,7 @@ class CompilerArray(CompilerTup):
                                Instr('addq', [Immediate(8), Reg('r15')])]
                 pre_stmts = addStack + [Instr('pushq', [Reg('rbp')]),
                           Instr('movq', [Reg('rsp'), Reg('rbp')]),
-                          Instr('subq', [Immediate(p.stack_space), Reg('rsp')])] + initialize + zeroes + [Jump('start')]
+                          Instr('subq', [Immediate(p.stack_space), Reg('rsp')])] + initialize + zeroes + [Jump(label_name('start'))]
                 con_stmts = [Instr('subq', [Immediate(p.num_spills), Reg('r15')]),
                                 Instr('addq', [Immediate(p.stack_space), Reg('rsp')]),
                                 Instr('popq', [Reg('rbp')])] + removeStack + [Instr('retq', [])]

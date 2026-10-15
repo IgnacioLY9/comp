@@ -410,19 +410,20 @@ class CompilerFun(CompilerArray):
                         return newTemp, newMap1 + argMaps + [Assign([newTemp], Call(newFunc, newArgs))]
                     else:
                         return Call(newFunc, newArgs), argMaps
-            case Call(FunRef(name, arity), args):
+            case Call(func, args):
+                newFunc, funcVars = self.rco_exp(func, True)
                 newVars = []
                 newMaps = []
                 for arg in args:
                     newVar, newMap = self.rco_exp(arg, True)
                     newVars.append(newVar)
                     newMaps.append(newMap)
-                newMaps = sum(newMaps, [])
+                newMaps = funcVars + sum(newMaps, [])
                 if need_atomic:
                     newTemp = Name(generate_name('tmp'))
-                    return newTemp, newMaps + [Assign([newTemp], Call(FunRef(name, arity), newVars))]
+                    return newTemp, newMaps + [Assign([newTemp], Call(newFunc, newVars))]
                 else:
-                    return Call(FunRef(name, arity), newVars), newMaps
+                    return Call(newFunc, newVars), newMaps
             case _:
                 return super().rco_exp(e, need_atomic)
 
@@ -506,7 +507,7 @@ class CompilerFun(CompilerArray):
             case _:
                 return super().explicate_stmt(s, cont, basic_blocks)
 
-    def explicate_def(self, s: stmt) -> stmt:
+    def explicate_def(self, s: FunctionDef) -> FunctionDef:
         match s:
             case FunctionDef(name, params, body, dl, returns, comment):
                 newbody = []
@@ -518,9 +519,9 @@ class CompilerFun(CompilerArray):
                 blocks[label_name(name + '_start')] = force(newbody)
                 return FunctionDef(name, params, blocks, dl, returns, comment)
             case _:
-                raise Exception
+                raise Exception ('error in explicate_def + ', repr(s))
     
-    def explicate_control(self, p: Module) -> CProgram:
+    def explicate_control(self, p: Module) -> CProgramDefs:
         match p:
             case Module(body):
                 funcDefs = []
@@ -554,7 +555,7 @@ class CompilerFun(CompilerArray):
                 case _:
                     continue
 
-    def remove_orphans(self, p: CProgram) -> CProgram:
+    def remove_orphans(self, p: CProgramDefs | FunctionDef) -> CProgramDefs | FunctionDef:
         match p:
             case FunctionDef(name, params, body, dl, returns, comment):
                 blocks = body
@@ -592,7 +593,7 @@ class CompilerFun(CompilerArray):
     def merge_blocks(self, child_label: str, parent: List[instr], child: List[instr]) -> List[instr]:
         return super().merge_blocks(child_label, parent, child)
 
-    def remove_jumps(self, p: X86Program) -> X86Program:
+    def remove_jumps(self, p: X86Program | FunctionDef) -> X86ProgramDefs | FunctionDef:
         match p:
             case FunctionDef(name, params, body, dl, returns, comment):
                 blocks = body
@@ -624,8 +625,9 @@ class CompilerFun(CompilerArray):
                         blocks.pop(label)
                     elif len(self.block_parent_dict[label]) == 1:
                         parent = self.block_parent_dict[label][0]
-                        blocks[parent] = self.merge_blocks(label, blocks[parent], ss)
-                        blocks.pop(label)
+                        blocks[parent], merge = self.merge_blocks(label, blocks[parent], ss)
+                        if merge:
+                            blocks.pop(label)
                 return FunctionDef(name, params, blocks, dl, returns, comment)
             case X86ProgramDefs(funDefs):
                 newDefs = []
@@ -666,10 +668,9 @@ class CompilerFun(CompilerArray):
                 moves = []
                 for i in range(len(newArgs)):
                     moves.append(Instr('movq', [newArgs[i], self.param_registers[i]]))
-                return moves + [TailJump(newFunc, len(args))]
+                return moves + [TailJump(newFun, len(args))]
             case Return(value):
-                st = Assign([Reg('rax')], value)
-                st = self.select_stmt(st)
+                st = self.select_stmt(Assign([Reg('rax')], value))
                 return st + [Jump(label_name(self.current_fun + '_conclusion'))]
             case Assign([lhs], Constant(None)):
                 newLhs = self.select_arg(lhs)
@@ -718,7 +719,7 @@ class CompilerFun(CompilerArray):
             case _:
                 return super().select_stmt(s)
 
-    def select_def(self, s: stmt) -> stmt:
+    def select_def(self, s: FunctionDef) -> FunctionDef:
         match s:
             case FunctionDef(name, params, blocks, dl, returns, comment):
                 self.current_fun = name
@@ -740,14 +741,19 @@ class CompilerFun(CompilerArray):
             case _:
                 raise Exception ('error in select_def + ', repr(s))
 
-    def select_instructions(self, p: Module) -> X86Program:
+    def select_instructions(self, p: CProgramDefs) -> X86ProgramDefs:
         match p:
             case CProgramDefs(funDefs):
                 newDefs = []
                 for fun in funDefs:
                     newDefs.append(self.select_def(fun))
                 temp = X86ProgramDefs(newDefs)
+                vars = []
+                for i in range(len(temp.defs)):
+                    vars.append(temp.defs[i].var_types)
                 temp = self.remove_jumps(temp)
+                for i in range(len(temp.defs)):
+                    temp.defs[i].var_types = vars[i]
                 return temp
             case _:
                 raise Exception ('error in select_intructions + ', repr(p))
@@ -763,52 +769,62 @@ class CompilerFun(CompilerArray):
     registers = set(caller_saved_registers + callee_saved_registers)
 
     def getLoc(self, param) -> Set[location]:
-        match param:
-            case Global(value):
-                return set()
-            case _:
-                return super().getLoc(param)
+        return super().getLoc(param)
 
     def R(self, i: instr) -> Set[location]:
         match i:
-            case Instr('imulq', args):
-                return self.getLoc(args[0]) | self.getLoc(args[1])
+            case TailJump(func, arity):
+                returnSet = set()
+                for n in range(arity):
+                    returnSet = returnSet | {self.param_registers[n]}
+                return self.getLoc(func) | returnSet
+            case IndirectCallq(func, arity):
+                returnSet = set()
+                for n in range(arity):
+                    returnSet = returnSet | {self.param_registers[n]}
+                return self.getLoc(func) | returnSet
+            case Instr('leaq', args):
+                return self.getLoc(args[0])
             case _:
                 return super().R(i)
 
     def W(self, i: instr) -> Set[location]:
         match i:
-            case Instr('imulq', args):
+            case TailJump(func, arity):
+                return set(self.caller_saved_registers)
+            case IndirectCallq(func, arity):
+                return set(self.caller_saved_registers)
+            case Instr('leaq', args):
                 return self.getLoc(args[1])
             case _:
                 return super().W(i)
 
     def getBeforeAfter(self, i: instr, prev_before):
-        curr_after = prev_before
-        curr_before = (curr_after - self.W(i)) | self.R(i) # - is set difference, | is union
-        return [curr_before, curr_after]
+        return super().getBeforeAfter(i, prev_before)
 
-    def uncover_live(self, p: X86Program) -> Dict[instr, Set[location]]:
-        match p:
-            case X86Program(blocks):
+    def uncover_live(self, f: FunctionDef) -> Dict[instr, Set[location]]:
+        match f:
+            case FunctionDef(name, params, body, dl, returns, comment):
+                blocks = body
                 live_before_dict_block = {}
                 live_after_dict_block = {}
                 live_before_dict_i = {}
                 live_after_dict_i = {}
-                live_after_dict_block['conclusion'] = set()
-                live_before_dict_block['conclusion'] = set()
+                live_after_dict_block[name + '_conclusion'] = set()
+                live_before_dict_block[name + '_conclusion'] = set()
                 graph = DirectedAdjList()
                 for (label, ss) in blocks.items():
+                    graph.add_vertex(label)
                     live_before_dict_block[label] = set()
                     live_after_dict_block[label] = set()
                     for s in ss:
                         match s:
                             case JumpIf(cc, arg):
-                                if arg == 'conclusion':
+                                if arg == name + '_conclusion':
                                     continue
                                 graph.add_edge(label, arg)
                             case Jump(arg):
-                                if arg == 'conclusion':
+                                if arg == name + '_conclusion':
                                     continue
                                 graph.add_edge(label, arg)
                             case _:
@@ -826,7 +842,7 @@ class CompilerFun(CompilerArray):
                                 i_before = i_before | live_before_dict_block[arg]
                                 i_after = i_before
                             case _:
-                                i_before, i_after = self.getBeforeAfter (blocks[label][i], i_before)
+                                i_before, i_after = self.getBeforeAfter(blocks[label][i], i_before)
                         if (i == 0):
                             live_before_dict_block[label] = i_before
                         live_before_dict_i.update({blocks[label][i] : i_before})
@@ -846,23 +862,29 @@ class CompilerFun(CompilerArray):
 
     def add_edges(self, i: instr, graph: UndirectedAdjList, afterSet: Set[location]):
         match i:
-            case Callq(name, args):
-                if name == label_name('collect'):
+            case IndirectCallq(func, arity):
+                for v in afterSet:
+                    if v not in self.registers and self.isPointer(self.var_types[v.id]):
+                        for r in self.callee_saved_registers:
+                            graph.add_edge(v, r)
+                for d in self.W(i):
                     for v in afterSet:
-                        if v not in self.registers and self.isPointer(self.var_types[v.id]):
-                            for r in self.callee_saved_registers:
-                                graph.add_edge(v, r)
-                return super().add_edges(i, graph, afterSet)
+                        if v != d:
+                            graph.add_edge(d,v)
+            case TailJump(func, arity):
+                return
             case _:
+                # leaq should be handled here
                 return super().add_edges(i, graph, afterSet)
 
     def add_ver(self, i: instr, graph: UndirectedAdjList):
         return super().add_ver(i, graph)
 
-    def build_interference(self, p: X86Program, afterDict: Dict[instr, Set[location]]) -> UndirectedAdjList:
+    def build_interference(self, p: FunctionDef, afterDict: Dict[instr, Set[location]]) -> UndirectedAdjList:
         self.var_types = p.var_types
         match p:
-            case X86Program(blocks):
+            case FunctionDef(name, params, body, dl, returns, comment):
+                blocks = body
                 graph = UndirectedAdjList()
                 for (label, ss) in blocks.items():
                     for i in ss:
@@ -908,9 +930,10 @@ class CompilerFun(CompilerArray):
     def detect_move(self, i: instr, graph: UndirectedAdjList):
         return super().detect_move(i, graph)
 
-    def build_move_graph(self, p:X86Program) -> UndirectedAdjList:
+    def build_move_graph(self, p: FunctionDef) -> UndirectedAdjList:
         match p:
-            case X86Program(blocks):
+            case FunctionDef(name, params, body, dl, returns, comment):
+                blocks = body
                 graph = UndirectedAdjList()
                 for (label, ss) in blocks.items():
                     for i in ss:
@@ -924,19 +947,29 @@ class CompilerFun(CompilerArray):
     ###############################################################
 
     def assign_homes_arg(self, a: arg, home: Dict[Variable, arg]) -> arg:
-        match a:
-            case Global(label):
-                return a
-            case _:
-                return super().assign_homes_arg(a, home)
+        return super().assign_homes_arg(a, home)
 
     def assign_homes_instr(self, i: instr, home: Dict[Variable, arg]) -> instr:
-        return super().assign_homes_instr(i, home)
+        match i:
+            case Instr('leaq', args):
+                return Instr('leaq', [self.assign_homes_arg(args[0], home), self.assign_homes_arg(args[1], home)])
+            case TailJump(func, arity):
+                return TailJump(self.assign_homes_arg(func, home), arity)
+            case IndirectCallq(func, arity):
+                return IndirectCallq(self.assign_homes_arg(func, home), arity)
+            case _:
+                return super().assign_homes_instr(i, home)
 
-    def assign_homes(self, p: X86Program) -> X86Program:
+    def assign_homes(self, p: X86ProgramDefs | FunctionDef) -> X86ProgramDefs | FunctionDef:
         match p:
-            case X86Program(blocks):
+            case X86ProgramDefs(funDefs):
+                newFuns = []
+                for f in funDefs:
+                    newFuns.append(self.assign_homes(f))
+                return X86ProgramDefs(newFuns)
+            case FunctionDef(name, params, body, dl, returns, comment):
                 live_sets = self.uncover_live(p)
+                print(live_sets)
                 interference_graph = self.build_interference(p, live_sets)
                 move_graph = self.build_move_graph(p)
                 colors = self.color_graph(interference_graph, move_graph)
@@ -948,7 +981,7 @@ class CompilerFun(CompilerArray):
                     for i in ss:
                         newInstr.append(self.assign_homes_instr(i, locations))
                     newBlocks[label] = newInstr
-                return X86Program(newBlocks)
+                return FunctionDef(name, params, newBlocks, dl, returns, comment)
             case _:
                 raise Exception ('error in assign_homes + ', repr(p))
 
@@ -958,22 +991,29 @@ class CompilerFun(CompilerArray):
 
     def patch_instr(self, i: instr) -> List[instr]:
         match i:
-            # case need mult
-            case (Instr('imulq', [arg, Immediate(value)])):
-                return [instr('movq', [Immediate(value), Reg('rax')]),
-                        instr('imulq', [arg, Reg('rax')])]
-            case (Instr('imulq', [arg, Deref(loc, offset)])):
-                return [instr('movq', [Deref(loc, offset), Reg('rax')]),
-                        instr('imulq', [arg, Reg('rax')])]
-            case (Instr('imulq', [arg, Global(label)])):
-                return [instr('movq', [Global(label), Reg('rax')]),
-                        instr('imulq', [arg, Reg('rax')])]
+            case Instr('leaq', [arg1, Deref(loc, offset)]):
+                return [Instr('movq', [Deref(loc, offset), Reg('rax')]),
+                        Instr('leaq', [arg1, Reg('rax')])]
+            case TailJump(func, arity):
+                if func != Reg('rax'):
+                    return [Instr('movq', [func, Reg('rax')]),
+                            TailJump(Reg('rax'), arity)]
+                else:
+                    return [i]
+            case IndirectCallq(func, arity):
+                return [i]
             case _:
                 return super().patch_instr(i)
 
-    def patch_instructions(self, p: X86Program) -> X86Program:
+    def patch_instructions(self, p: X86ProgramDefs | FunctionDef) -> X86ProgramDefs | FunctionDef:
         match p:
-            case X86Program(blocks):
+            case X86ProgramDefs(funDefs):
+                newFuns = []
+                for fun in funDefs:
+                    newFuns.append(self.patch_instructions(fun))
+                return X86ProgramDefs(newFuns)
+            case FunctionDef(name, params, body, dl, returns, comment):
+                blocks = body
                 newBlocks = {}
                 for (label, ss) in blocks.items():
                     newInstr = []
@@ -981,7 +1021,7 @@ class CompilerFun(CompilerArray):
                         newInstr.append(self.patch_instr(i)) 
                     newInstr = sum(newInstr, [])
                     newBlocks[label] = newInstr
-                return X86Program(newBlocks)
+                return FunctionDef(name, params, newBlocks, dl, returns, comment)
             case _:
                 raise Exception ('error in patch_instructions + ', repr(p))
 
@@ -1001,13 +1041,23 @@ class CompilerFun(CompilerArray):
         if isinstance(arg, Deref) and arg.reg == 'r15':
             root_used.add(arg)
 
-    def locations_used(self, p: X86Program):
+    def locations_used(self, p: FunctionDef):
         p.s = set()
         p.c = set()
         p.r = set()
+        p.tailCall = None
         for (label, ss) in p.body.items():
             for i in ss:
                 match i:
+                    case IndirectCallq(fun, arity):
+                        self.in_callee(p.c, fun)
+                        self.in_stack(p.s, fun)
+                        self.in_root(p.r, fun)
+                    case TailJump(fun, arity):
+                        self.in_callee(p.c, fun)
+                        self.in_stack(p.s, fun)
+                        self.in_root(p.r, fun)
+                        p.tailCall = fun
                     case Callq(fun, arity):
                         continue
                     case Instr(operation, (arg1, arg2)):
@@ -1033,9 +1083,22 @@ class CompilerFun(CompilerArray):
     ######## Prelude and Conclusion
     ###############################################################
 
-    def prelude_and_conclusion(self, p: X86Program) -> X86Program:
+    def replace_tail_call(self, i: instr, conc: list[instr]):
+        match i:
+            case TailJump(fun, arity):
+                return conc + [IndirectJump(fun), Instr('retq', [])]
+            case _:
+                return [i]
+
+    def prelude_and_conclusion(self, p: X86ProgramDefs | FunctionDef) -> X86Program | FunctionDef:
         match p:
-            case X86Program(blocks):
+            case X86ProgramDefs(funs):
+                blocks = {}
+                for f in funs:
+                    blocks = blocks | self.prelude_and_conclusion(f)
+                return X86Program(blocks)
+            case FunctionDef(name, params, body, dl, returns, comment):
+                blocks = body
                 self.locations_used(p)
                 callee_reg = list(p.c)
                 addStack = [Instr('pushq', [loc]) for loc in callee_reg]
@@ -1044,22 +1107,28 @@ class CompilerFun(CompilerArray):
                 p.root_space = 2 ** 14
                 p.heap_space = 2 ** 14
                 p.num_spills = len(p.r)
-                initialize = [Instr('movq', [Immediate(p.root_space), Reg('rdi')]),
-                              Instr('movq', [Immediate(p.heap_space), Reg('rsi')]),
-                              Callq(label_name('initialize'), 2),
-                              Instr('movq', [Global(label_name('rootstack_begin')), Reg('r15')])]
+                if name == 'main':
+                    initialize = [Instr('movq', [Immediate(p.root_space), Reg('rdi')]),
+                                Instr('movq', [Immediate(p.heap_space), Reg('rsi')]),
+                                Callq(label_name('initialize'), 2),
+                                Instr('movq', [Global(label_name('rootstack_begin')), Reg('r15')])]
+                else:
+                    initialize = []
                 zeroes = []
                 for i in range(p.num_spills):
                     zeroes += [Instr('movq', [Immediate(0), Deref('r15', 0)]),
                                Instr('addq', [Immediate(8), Reg('r15')])]
                 pre_stmts = addStack + [Instr('pushq', [Reg('rbp')]),
                           Instr('movq', [Reg('rsp'), Reg('rbp')]),
-                          Instr('subq', [Immediate(p.stack_space), Reg('rsp')])] + initialize + zeroes + [Jump('start')]
+                          Instr('subq', [Immediate(p.stack_space), Reg('rsp')])] + initialize + zeroes + [Jump(label_name(name + '_start'))]
                 con_stmts = [Instr('subq', [Immediate(p.num_spills), Reg('r15')]),
                                 Instr('addq', [Immediate(p.stack_space), Reg('rsp')]),
-                                Instr('popq', [Reg('rbp')])] + removeStack + [Instr('retq', [])]
-                blocks['main'] = pre_stmts
-                blocks['conclusion'] = con_stmts
-                return p
+                                Instr('popq', [Reg('rbp')])] + removeStack
+                newBlocks = {}
+                for (label, ss) in blocks.items():
+                        newBlocks[label] = sum([self.replace_tail_call(s, con_stmts) for s in ss], [])
+                newBlocks[name] = pre_stmts
+                newBlocks[name + '_conclusion'] = con_stmts + [Instr('retq', [])]
+                return newBlocks
             case _:
                 raise Exception ('error in prelude_and_conclusion + ', repr(p))

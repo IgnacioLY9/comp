@@ -42,6 +42,10 @@ def convert_instr(instr):
             return Tree('jmp', [label])
         case JumpIf(cc, label):
             return Tree('j' + cc, [label])
+        case IndirectCallq(func, n):
+            return Tree('indirect_callq', [convert_arg(func)])
+        case IndirectJump(arg):
+            return Tree('indirect_jmp', [convert_arg(arg)])
         case _:
             raise Exception('error in convert_instr, unhandled ' + repr(instr))
 

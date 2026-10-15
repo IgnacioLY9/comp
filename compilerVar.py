@@ -333,7 +333,6 @@ class CompilerVar:
                             Instr('movq', [Reg('rax'), Deref(reg, offset)])]
                 else:
                     return [i]
-                return [i]
             case Instr('movq', (arg1, arg2)):
                 if arg1 == arg2:
                     return []

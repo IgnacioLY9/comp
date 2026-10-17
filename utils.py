@@ -1165,7 +1165,6 @@ def trace(msg):
     if tracing:
         print(msg, file=sys.stderr)
 
-
 def is_python_extension(filename):
     s = os.path.splitext(filename)
     if len(s) > 1:

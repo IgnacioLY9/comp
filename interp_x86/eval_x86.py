@@ -246,9 +246,6 @@ class X86Emulator:
                 a1, a2 = instr.children
                 v1 = self.eval_arg(a1)
                 v2 = self.eval_arg(a2)
-                with open("example.txt", "w", encoding="utf-8") as file:
-                    file.write(repr(a1))
-                    file.write(repr(a2))
                 self.store_arg(a2, mul64(v1, v2))
 
             elif instr.data == 'subq':

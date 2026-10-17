@@ -1,80 +1,80 @@
 	.align 16
-block.591:
+block.920:
     movq $0, %rax
-    jmp conclusion
+    jmp main_conclusion
 
 	.align 16
-block.592:
+block.921:
     movq %rcx, %rdi
     callq print_int
-    jmp block.591
+    jmp block.920
 
 	.align 16
-block.593:
+block.922:
     movq $2, %rax
     addq %rdx, %rax
     movq %rax, %rcx
-    jmp block.592
+    jmp block.921
 
 	.align 16
-block.594:
+block.923:
     movq $10, %rax
     addq %rdx, %rax
     movq %rax, %rcx
-    jmp block.592
+    jmp block.921
 
 	.align 16
-block.595:
+block.924:
     cmpq $0, %rsi
-    je block.593
-    jmp block.594
+    je block.922
+    jmp block.923
 
 	.align 16
-block.597:
+block.926:
     movq %rcx, %rdi
     callq print_int
-    jmp block.591
+    jmp block.920
 
 	.align 16
-block.598:
+block.927:
     movq $3, %rax
     addq %rdx, %rax
     movq %rax, %rcx
-    jmp block.597
+    jmp block.926
 
 	.align 16
-block.599:
+block.928:
     movq $12, %rax
     addq %rdx, %rax
     movq %rax, %rcx
-    jmp block.597
+    jmp block.926
 
 	.align 16
-block.600:
+block.929:
     cmpq $0, %rsi
-    je block.598
-    jmp block.599
+    je block.927
+    jmp block.928
 
 	.align 16
-block.602:
+block.931:
     cmpq $1, %rsi
-    jl block.595
+    jl block.924
     cmpq $2, %rsi
-    je block.593
-    jmp block.594
+    je block.922
+    jmp block.923
 
 	.align 16
-start:
+main_start:
     movq $0, %rcx
     movq $1, %rsi
     movq $1, %rdx
     cmpq $1, %rcx
-    je block.602
+    je block.931
     cmpq $1, %rsi
-    jl block.600
+    jl block.929
     cmpq $2, %rsi
-    je block.598
-    jmp block.599
+    je block.927
+    jmp block.928
 
 	.globl main
 	.align 16
@@ -86,10 +86,10 @@ main:
     movq $16384, %rsi
     callq initialize
     movq rootstack_begin(%rip), %r15
-    jmp start
+    jmp main_start
 
 	.align 16
-conclusion:
+main_conclusion:
     subq $0, %r15
     addq $0, %rsp
     popq %rbp

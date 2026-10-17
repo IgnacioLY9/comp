@@ -1,32 +1,32 @@
 	.align 16
-start:
+main_start:
     movq $12, %rcx
     movq $4, %rsi
     movq %rcx, %rdx
     negq %rdx
     movq %rdx, %rax
     addq %rsi, %rax
-    movq %rax, %r8
+    movq %rax, %r9
     movq %rcx, %rax
     subq %rsi, %rax
-    movq %rax, %r9
-    movq %r8, %rdx
+    movq %rax, %rdi
+    movq %r9, %rdx
     negq %rdx
     movq %rdx, %rax
-    addq %r9, %rax
-    movq %rax, %rdi
+    addq %rdi, %rax
+    movq %rax, %r8
     movq %rsi, %rdx
     negq %rdx
-    movq %rdi, %rax
+    movq %r8, %rax
     subq %rdx, %rax
-    movq %rax, %rdi
-    movq %rdi, %rax
+    movq %rax, %r8
+    movq %r8, %rax
     addq %rcx, %rax
     movq %rax, %rdx
     movq %rdx, %rax
     subq %rsi, %rax
     movq %rax, %r10
-    movq %r9, %rdx
+    movq %rdi, %rdx
     negq %rdx
     movq %r10, %rax
     addq %rdx, %rax
@@ -39,18 +39,18 @@ start:
     addq %rsi, %rax
     movq %rax, %rcx
     movq %rcx, %rax
+    subq %r9, %rax
+    movq %rax, %rcx
+    movq %rcx, %rax
+    addq %rdi, %rax
+    movq %rax, %rcx
+    movq %rcx, %rax
     subq %r8, %rax
-    movq %rax, %rcx
-    movq %rcx, %rax
-    addq %r9, %rax
-    movq %rax, %rcx
-    movq %rcx, %rax
-    subq %rdi, %rax
     movq %rax, %rcx
     movq %rcx, %rdi
     callq print_int
     movq $0, %rax
-    jmp conclusion
+    jmp main_conclusion
 
 	.globl main
 	.align 16
@@ -62,10 +62,10 @@ main:
     movq $16384, %rsi
     callq initialize
     movq rootstack_begin(%rip), %r15
-    jmp start
+    jmp main_start
 
 	.align 16
-conclusion:
+main_conclusion:
     subq $0, %r15
     addq $0, %rsp
     popq %rbp

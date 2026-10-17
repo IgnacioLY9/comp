@@ -109,8 +109,9 @@ class CompilerTup(CompilerWhile):
                 return BinOp(self.expose_exp(arg1), op, self.expose_exp(arg2))
             case UnaryOp(op, arg):
                 return UnaryOp(op, self.expose_exp(arg))
-            case Call(Name(func), args):
-                return Call(Name(func), [self.expose_exp(ex) for ex in args])
+            case Call(func, args):
+                newfunc = self.expose_exp(func)
+                return Call(newfunc, [self.expose_exp(ex) for ex in args])
             case IfExp(arg1, arg2, arg3):
                 return IfExp(self.expose_exp(arg1), self.expose_exp(arg2), self.expose_exp(arg3))
             case Begin(body, result):

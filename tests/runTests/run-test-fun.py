@@ -47,10 +47,10 @@ interp_dict = {
     # 'select_instructions': interp_x86,
     # 'assign_homes': interp_x86,
     # 'patch_instructions': interp_x86,
-    # 'prelude_and_conclusion': interp_x86,
+    'prelude_and_conclusion': interp_x86,
 }
 
-run_one_test(os.getcwd() + '/tests/fun/t1.py',
+run_one_test(os.getcwd() + '/tests/fun/t8.py',
                  'fun',
                  compiler,
                  'fun',

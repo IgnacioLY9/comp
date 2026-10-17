@@ -15,7 +15,7 @@ import type_check_Cif
 from utils import run_tests, run_one_test, enable_tracing
 from interp_x86.eval_x86 import interp_x86
 
-enable_tracing()
+# enable_tracing()
 
 compiler = compilerIf.CompilerIf()
 

@@ -15,23 +15,27 @@ import type_check_Cfun
 from utils import run_tests, run_one_test, enable_tracing
 from interp_x86.eval_x86 import interp_x86
 
-enable_tracing()
+# enable_tracing()
 
-compiler = compilerFun.CompilerArray()
+compiler = compilerFun.CompilerFun()
 
-typecheck_L = type_check_Lfun.TypeCheckLarray().type_check
-typecheck_C = type_check_Cfun.TypeCheckCarray().type_check
+typecheck_L = type_check_Lfun.TypeCheckLfun().type_check
+typecheck_C = type_check_Cfun.TypeCheckCfun().type_check
 
 typecheck_dict = {
     'source': typecheck_L,
     'partial_eval': typecheck_L,
+    'shrink': typecheck_L,
+    'reveal_functions': typecheck_L,
     'resolve': typecheck_L,
+    'check_bounds': typecheck_L,
+    'limit_functions': typecheck_L,
     'expose_allocation': typecheck_L,
     'remove_complex_operands': typecheck_L,
     'explicate_control': typecheck_C,
 }
-interpL = interp_Lfun.InterpLarray().interp
-interpC = interp_Cfun.InterpCarray().interp
+interpL = interp_Lfun.InterpLfun().interp
+interpC = interp_Cfun.InterpCfun().interp
 interp_dict = {
     # 'shrink': interpL,
     # 'partial_eval': interpL,
@@ -48,6 +52,21 @@ interp_dict = {
 
 if True:
     run_tests('fun', compiler, 'fun',
+              typecheck_dict,
+              interp_dict)
+    run_tests('array', compiler, 'fun',
+              typecheck_dict,
+              interp_dict)
+    run_tests('tup', compiler, 'fun',
+              typecheck_dict,
+              interp_dict)
+    run_tests('while', compiler, 'fun',
+              typecheck_dict,
+              interp_dict)
+    run_tests('if', compiler, 'fun',
+              typecheck_dict,
+              interp_dict)
+    run_tests('var', compiler, 'fun',
               typecheck_dict,
               interp_dict)
 else:

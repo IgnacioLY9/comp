@@ -1,5 +1,5 @@
 	.align 16
-block.7:
+block.39:
     movq %rdi, %rax
     jmp tail_sum_conclusion
 
@@ -8,7 +8,7 @@ tail_sum_start:
     movq %rdi, %rdx
     movq %rsi, %rdi
     cmpq $0, %rdx
-    je block.7
+    je block.39
     leaq tail_sum(%rip), %rcx
     movq $-1, %rax
     addq %rdx, %rax
@@ -18,10 +18,12 @@ tail_sum_start:
     movq %rax, %rdx
     movq %rsi, %rdi
     movq %rdx, %rsi
-    callq *%rcx
-    movq %rax, %rcx
     movq %rcx, %rax
-    jmp tail_sum_conclusion
+    subq $0, %r15
+    addq $0, %rsp
+    popq %rbp
+    jmp *%rax
+    retq 
 
 	.align 16
 tail_sum:

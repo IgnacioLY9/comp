@@ -1,21 +1,21 @@
 	.align 16
-block.641:
+block.970:
     movq %rcx, %rdi
     callq print_int
     movq $0, %rax
-    jmp conclusion
+    jmp main_conclusion
 
 	.align 16
-block.642:
+block.971:
     movq $2, %rcx
-    jmp block.641
+    jmp block.970
 
 	.align 16
-start:
+main_start:
     movq $1, %rcx
     movq $0, %rbx
     cmpq $3, %rcx
-    je block.642
+    je block.971
     callq read_int
     movq %rax, %rcx
     movq %rbx, %rax
@@ -24,7 +24,7 @@ start:
     movq $2, %rax
     addq %rcx, %rax
     movq %rax, %rcx
-    jmp block.641
+    jmp block.970
 
 	.globl main
 	.align 16
@@ -37,10 +37,10 @@ main:
     movq $16384, %rsi
     callq initialize
     movq rootstack_begin(%rip), %r15
-    jmp start
+    jmp main_start
 
 	.align 16
-conclusion:
+main_conclusion:
     subq $0, %r15
     addq $8, %rsp
     popq %rbp

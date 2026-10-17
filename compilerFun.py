@@ -162,6 +162,7 @@ class CompilerFun(CompilerArray):
                 raise Exception ('error in resolve_stmt + ', repr(s))
 
     def reveal_functions(self, p: Module) -> Module:
+        self.functionToArity = {}
         match p:
             case Module(body):
                 stmts = [self.reveal_stmt(stmt) for stmt in body]
@@ -185,8 +186,9 @@ class CompilerFun(CompilerArray):
             case Call(Name('len'),[exp]):
                 return super().resolve_exp(e)
             case Call(fun, args):
+                newFun = self.resolve_exp(fun)
                 newArgs = [self.resolve_exp(a) for a in args]
-                return Call(fun, args)
+                return Call(newFun, newArgs)
             case _:
                 return super().resolve_exp(e)
 
@@ -229,8 +231,9 @@ class CompilerFun(CompilerArray):
             case Call(Name('array_store'), [tup, idx, val]):
                 return super().cb_exp(e)
             case Call(fun, args):
+                newFun = self.cb_exp(fun)
                 newArgs = [self.cb_exp(a) for a in args]
-                return Call(fun, newArgs)
+                return Call(newFun, newArgs)
             case _:
                 return super().cb_exp(e)
 
@@ -430,8 +433,13 @@ class CompilerFun(CompilerArray):
     def rco_stmt(self, s: stmt) -> List[stmt]:
         match s:
             case Return(value):
-                newVar, newMap = self.rco_exp(value, True)
-                return newMap + [Return(newVar)]
+                match value:
+                    case Call(func, args):
+                        newVar, newMap = self.rco_exp(value, False)
+                        return newMap + [Return(newVar)]
+                    case _:
+                        newVar, newMap = self.rco_exp(value, True)
+                        return newMap + [Return(newVar)]
             case FunctionDef(name, params, body, dl, returns, comment):
                 newBody = sum([self.rco_stmt(st) for st in body], [])
                 return [FunctionDef(name, params, newBody, dl, returns, comment)]
@@ -485,7 +493,9 @@ class CompilerFun(CompilerArray):
                 else:
                     return [TailCall(Name(func), args)]
             case Call(fun, args):
-                return [TailCall(fun, args)]
+                newFun = self.explicate_tail(fun)
+                newArgs = [self.explicate_tail(arg) for arg in args]
+                return [TailCall(newFun, newArgs)]
             case _:
                 return [Return(e)]
 
@@ -969,7 +979,6 @@ class CompilerFun(CompilerArray):
                 return X86ProgramDefs(newFuns)
             case FunctionDef(name, params, body, dl, returns, comment):
                 live_sets = self.uncover_live(p)
-                print(live_sets)
                 interference_graph = self.build_interference(p, live_sets)
                 move_graph = self.build_move_graph(p)
                 colors = self.color_graph(interference_graph, move_graph)

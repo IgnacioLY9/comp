@@ -11,11 +11,11 @@ sevenSum_start:
     movq %rax, %rcx
     movq %rcx, %rax
     addq %r8, %rax
-    movq %rax, %rcx
+    movq %rax, %rdx
     movq %r9, %r11
-    movq 8(%r11), %rdx
-    movq %rcx, %rax
-    addq %rdx, %rax
+    movq 8(%r11), %rcx
+    movq %rdx, %rax
+    addq %rcx, %rax
     movq %rax, %rcx
     movq %r9, %r11
     movq 16(%r11), %rdx
@@ -40,7 +40,7 @@ sevenSum_conclusion:
     retq 
 
 	.align 16
-block.17:
+block.299:
     movq free_ptr(%rip), %r11
     addq $24, free_ptr(%rip)
     movq $5, 0(%r11)
@@ -70,19 +70,19 @@ main_start:
     addq $24, %rax
     movq %rax, %rcx
     cmpq fromspace_end(%rip), %rcx
-    jl block.17
+    jl block.299
     movq %r15, %rdi
     movq $24, %rsi
     callq collect
-    jmp block.17
+    jmp block.299
 
 	.globl main
 	.align 16
 main:
-    pushq %r12
     pushq %r15
-    pushq %r13
     pushq %rbx
+    pushq %r12
+    pushq %r13
     pushq %rbp
     movq %rsp, %rbp
     subq $0, %rsp
@@ -97,10 +97,10 @@ main_conclusion:
     subq $0, %r15
     addq $0, %rsp
     popq %rbp
-    popq %rbx
     popq %r13
-    popq %r15
     popq %r12
+    popq %rbx
+    popq %r15
     retq 
 
 
